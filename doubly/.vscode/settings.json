@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "memory": "c",
+        "utility": "c",
+        "xlocale": "c",
+        "bit": "c",
+        "tuple": "c",
+        "xmemory": "c",
+        "xutility": "c"
+    }
+}
