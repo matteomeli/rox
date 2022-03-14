@@ -74,7 +74,7 @@ class Scanner {
 
             case '/':
                 if (match('/')) {
-                    // A comment gos until the end of the line
+                    // A comment goes until the end of the line
                     while (peek() != '\n' && !isAtEnd()) {
                         advance();
                     }
@@ -172,7 +172,7 @@ class Scanner {
         }
 
         if (isAtEnd()) {
-            Lox.error(line, "Undtermined string.");
+            Lox.error(line, "Untermined string.");
             return;
         }
 
