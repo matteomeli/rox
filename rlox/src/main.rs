@@ -4,7 +4,7 @@ use std::{
     process::exit,
 };
 
-use rlox::scanner::Scanner;
+use rlox::{scanner::Scanner, Result};
 
 fn main() {
     let mut args = std::env::args();
@@ -22,7 +22,9 @@ fn run_file(path: String) {
     let mut file = File::open(path).unwrap();
     let mut source = String::new();
     file.read_to_string(&mut source).unwrap();
-    run(source);
+    if let Err(e) = run(source) {
+        eprintln!("{:?}", e);
+    }
 }
 
 fn run_prompt() {
@@ -31,7 +33,11 @@ fn run_prompt() {
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
         match line {
-            Ok(line) => run(line),
+            Ok(line) => {
+                if let Err(e) = run(line) {
+                    eprintln!("{:?}", e);
+                }
+            }
             Err(_) => break,
         }
         print!("> ");
@@ -39,11 +45,14 @@ fn run_prompt() {
     }
 }
 
-fn run(source: String) {
+fn run(source: String) -> Result<()> {
     let mut scanner = Scanner::new(source);
-    scanner.scan_tokens();
+    scanner.scan_tokens()?;
 
+    // For now just print the tokens
     for token in scanner.tokens() {
         println!("{:?}", token);
     }
+
+    Ok(())
 }

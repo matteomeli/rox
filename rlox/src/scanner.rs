@@ -1,4 +1,7 @@
-use crate::token::{Literal, Token, TokenType};
+use crate::{
+    token::{Literal, Token, TokenType},
+    Result, ScannerError, ScannerErrorKind,
+};
 
 pub struct Scanner {
     source: String,
@@ -19,14 +22,16 @@ impl Scanner {
         }
     }
 
-    pub fn scan_tokens(&mut self) {
+    pub fn scan_tokens(&mut self) -> Result<()> {
         while !self.is_at_end() {
             self.start = self.current;
-            self.scan_token();
+            self.scan_token()?
         }
 
         self.tokens
             .push(Token::new(TokenType::Eof, "".to_string(), None, self.line));
+
+        Ok(())
     }
 
     pub fn tokens(&self) -> &[Token] {
@@ -37,7 +42,7 @@ impl Scanner {
         self.current >= self.source.len()
     }
 
-    fn scan_token(&mut self) {
+    fn scan_token(&mut self) -> Result<()> {
         match self.advance() {
             // Single character tokens
             '(' => self.add_token(TokenType::LeftParen, None),
@@ -90,8 +95,9 @@ impl Scanner {
                             self.advance();
                         }
                     }
+                    Ok(())
                 } else {
-                    self.add_token(TokenType::Slash, None);
+                    self.add_token(TokenType::Slash, None)
                 }
             }
             // TODO: Add support to Lox’s scanner for C-style /* ... */ block comments.
@@ -99,25 +105,31 @@ impl Scanner {
             // Is adding support for nesting more work than you expected? Why?
 
             // Ignore whitespace
-            ' ' | '\r' | '\t' => (),
+            ' ' | '\r' | '\t' => Ok(()),
 
-            '\n' => self.line = self.line + 1,
+            '\n' => {
+                self.line = self.line + 1;
+                Ok(())
+            }
 
             '"' => self.string(),
 
             c => {
                 if Scanner::is_digit(c) {
-                    self.number();
+                    self.number()
                 } else if Scanner::is_alpha(c) {
-                    self.identifier();
+                    self.identifier()
                 } else {
-                    // TODO: Error
+                    Err(ScannerError::new(
+                        self.line,
+                        ScannerErrorKind::UnexpcetedCharacter,
+                    ))
                 }
             }
         }
     }
 
-    fn number(&mut self) {
+    fn number(&mut self) -> Result<()> {
         while let Some(c) = self.peek() {
             if !Scanner::is_digit(c) {
                 break;
@@ -152,10 +164,10 @@ impl Scanner {
                 .parse::<f64>()
                 .unwrap(),
         );
-        self.add_token(TokenType::Number, Some(literal));
+        self.add_token(TokenType::Number, Some(literal))
     }
 
-    fn identifier(&mut self) {
+    fn identifier(&mut self) -> Result<()> {
         while let Some(c) = self.peek() {
             if !Scanner::is_alphanumeric(c) {
                 break;
@@ -191,7 +203,7 @@ impl Scanner {
             _ => TokenType::Identifier,
         };
 
-        self.add_token(token_type, None);
+        self.add_token(token_type, None)
     }
 
     fn is_digit(c: char) -> bool {
@@ -206,7 +218,7 @@ impl Scanner {
         c.is_ascii_alphanumeric()
     }
 
-    fn string(&mut self) {
+    fn string(&mut self) -> Result<()> {
         while let Some(c) = self.peek() {
             if c == '"' || self.is_at_end() {
                 break;
@@ -220,8 +232,10 @@ impl Scanner {
         }
 
         if self.is_at_end() {
-            // TODO: error, unterminated string
-            return;
+            return Err(ScannerError::new(
+                self.line,
+                ScannerErrorKind::UnterminatedString,
+            ));
         }
 
         // Consume the closing "
@@ -236,7 +250,7 @@ impl Scanner {
                 .take(literal_length)
                 .collect(),
         );
-        self.add_token(TokenType::String, Some(literal));
+        self.add_token(TokenType::String, Some(literal))
     }
 
     fn peek(&self) -> Option<char> {
@@ -275,7 +289,7 @@ impl Scanner {
         c
     }
 
-    fn add_token(&mut self, token_type: TokenType, literal: Option<Literal>) {
+    fn add_token(&mut self, token_type: TokenType, literal: Option<Literal>) -> Result<()> {
         let lexeme_length = self.current - self.start;
         let lexeme = self
             .source
@@ -285,5 +299,6 @@ impl Scanner {
             .collect();
         self.tokens
             .push(Token::new(token_type, lexeme, literal, self.line));
+        Ok(())
     }
 }
