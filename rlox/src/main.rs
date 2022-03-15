@@ -23,7 +23,7 @@ fn run_file(path: String) {
     let mut source = String::new();
     file.read_to_string(&mut source).unwrap();
     if let Err(e) = run(source) {
-        eprintln!("{:?}", e);
+        eprintln!("{}", e);
     }
 }
 
@@ -35,7 +35,7 @@ fn run_prompt() {
         match line {
             Ok(line) => {
                 if let Err(e) = run(line) {
-                    eprintln!("{:?}", e);
+                    eprintln!("{}", e);
                 }
             }
             Err(_) => break,

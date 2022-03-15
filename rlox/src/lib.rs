@@ -1,3 +1,5 @@
+use core::fmt;
+
 pub mod scanner;
 pub mod token;
 
@@ -15,8 +17,23 @@ impl ScannerError {
     }
 }
 
+impl fmt::Display for ScannerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[line {}] Error: {}", self.line, self.kind)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ScannerErrorKind {
     UnexpcetedCharacter,
     UnterminatedString,
+}
+
+impl fmt::Display for ScannerErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            Self::UnexpcetedCharacter => write!(f, "Unexpected character."),
+            Self::UnterminatedString => write!(f, "Unterminated string."),
+        }
+    }
 }
