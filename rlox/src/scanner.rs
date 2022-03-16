@@ -155,7 +155,7 @@ impl Scanner {
         }
 
         let literal_length = self.current - self.start;
-        let literal = Literal::Number(
+        let number_literal = Literal::Number(
             self.source
                 .chars()
                 .skip(self.start)
@@ -164,7 +164,7 @@ impl Scanner {
                 .parse::<f64>()
                 .unwrap(),
         );
-        self.add_token(TokenType::Number, Some(literal))
+        self.add_token(TokenType::Number, Some(number_literal))
     }
 
     fn identifier(&mut self) -> Result<()> {
@@ -243,14 +243,14 @@ impl Scanner {
 
         // Trim surrounding quotes
         let literal_length = (self.current - 1) - (self.start + 1);
-        let literal = Literal::String(
+        let string_literal = Literal::String(
             self.source
                 .chars()
                 .skip(self.start + 1)
                 .take(literal_length)
                 .collect(),
         );
-        self.add_token(TokenType::String, Some(literal))
+        self.add_token(TokenType::String, Some(string_literal))
     }
 
     fn peek(&self) -> Option<char> {
