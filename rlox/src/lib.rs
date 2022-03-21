@@ -1,4 +1,5 @@
 use core::fmt;
+use std::fmt::write;
 
 pub mod scanner;
 pub mod token;
@@ -27,6 +28,7 @@ impl fmt::Display for ScannerError {
 pub enum ScannerErrorKind {
     UnexpcetedCharacter,
     UnterminatedString,
+    UnterminatedBlockComment,
 }
 
 impl fmt::Display for ScannerErrorKind {
@@ -34,6 +36,7 @@ impl fmt::Display for ScannerErrorKind {
         match &self {
             Self::UnexpcetedCharacter => write!(f, "Unexpected character."),
             Self::UnterminatedString => write!(f, "Unterminated string."),
+            Self::UnterminatedBlockComment => write!(f, "Unterminated block comment."),
         }
     }
 }

@@ -91,11 +91,48 @@ impl Scanner {
                 if self.matches('/') {
                     while let Some(c) = self.peek() {
                         // A comment goes until the end of the line
-                        if c != '\n' && !self.is_at_end() {
-                            self.advance();
+                        if c == '\n' || self.is_at_end() {
+                            break;
                         }
+
+                        self.advance();
                     }
                     Ok(())
+                } else if self.matches('*') {
+                    let mut opened = 1u32;
+
+                    while !self.is_at_end() {
+                        match (self.peek(), self.peek_next()) {
+                            // A block comment goes until a "*/" pair is found
+                            (Some('*'), Some('/')) => {
+                                self.advance();
+                                self.advance();
+                                opened = opened - 1;
+                                if opened == 0 {
+                                    break;
+                                }
+                            }
+                            // Handle nested block comments
+                            (Some('/'), Some('*')) => {
+                                self.advance();
+                                self.advance();
+                                opened = opened + 1;
+                            }
+                            _ => {
+                                self.advance();
+                            }
+                        }
+                    }
+
+                    // If no opened block comments left we are ok
+                    if opened == 0 {
+                        Ok(())
+                    } else {
+                        Err(ScannerError::new(
+                            self.line,
+                            ScannerErrorKind::UnterminatedBlockComment,
+                        ))
+                    }
                 } else {
                     self.add_token(TokenType::Slash, None)
                 }

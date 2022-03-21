@@ -1,0 +1,17 @@
+var test = "test"; // An inline comment
+
+/* 
+
+// Nested inline comment
+
+/*
+ * Nested block comment.
+
+/*
+ * 2nd nested block.
+ */
+
+ */
+
+ * This is a block comment.
+ */

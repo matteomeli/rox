@@ -92,6 +92,21 @@
             "symbolSearchPath": "https://msdl.microsoft.com/download/symbols",
             "environment": [],
             "console": "integratedTerminal"
+        },
+        {
+            "type": "cppvsdbg",
+            "request": "launch",
+            "name": "(Windows) Launch with file",
+            "program": "${workspaceRoot}/target/debug/rlox.exe",
+            "args": ["${workspaceRoot}/test.lox"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "sourceFileMap": {
+                "/rustc/9d1b2106e23b1abd32fce1f17267604a5102f57a": "${env:USERPROFILE}/scoop/apps/rustup/current/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/src/rust"
+            },
+            "symbolSearchPath": "https://msdl.microsoft.com/download/symbols",
+            "environment": [],
+            "console": "integratedTerminal"
         }
     ]
 }
