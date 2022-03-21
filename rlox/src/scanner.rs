@@ -118,6 +118,10 @@ impl Scanner {
                                 self.advance();
                                 opened = opened + 1;
                             }
+                            (Some('\n'), _) => {
+                                self.line = self.line + 1;
+                                self.advance();
+                            }
                             _ => {
                                 self.advance();
                             }
@@ -339,3 +343,5 @@ impl Scanner {
         Ok(())
     }
 }
+
+// TODO: Add unit tests
