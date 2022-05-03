@@ -54,14 +54,15 @@ pub enum TokenType {
 pub enum Literal {
     String(String),
     Number(f64),
+    Nil,
 }
 
 #[derive(Debug)]
 pub struct Token {
-    token_type: TokenType,
-    lexeme: String,
-    literal: Option<Literal>,
-    line: u32,
+    pub token_type: TokenType,
+    pub lexeme: String,
+    pub literal: Option<Literal>,
+    pub line: u32,
 }
 
 impl Token {
