@@ -1,7 +1,8 @@
-use crate::{
-    token::{Literal, Token, TokenType},
-    Result, ScannerError, ScannerErrorKind,
-};
+use std::fmt;
+
+use crate::token::{Literal, Token, TokenType};
+
+pub type ScanResult<T> = std::result::Result<T, ScanError>;
 
 pub struct Scanner {
     source: String,
@@ -22,7 +23,7 @@ impl Scanner {
         }
     }
 
-    pub fn scan_tokens(&mut self) -> Result<()> {
+    pub fn scan_tokens(&mut self) -> ScanResult<&[Token]> {
         while !self.is_at_end() {
             self.start = self.current;
             self.scan_token()?
@@ -31,7 +32,7 @@ impl Scanner {
         self.tokens
             .push(Token::new(TokenType::Eof, "".to_string(), None, self.line));
 
-        Ok(())
+        Ok(self.tokens())
     }
 
     pub fn tokens(&self) -> &[Token] {
@@ -42,7 +43,7 @@ impl Scanner {
         self.current >= self.source.len()
     }
 
-    fn scan_token(&mut self) -> Result<()> {
+    fn scan_token(&mut self) -> ScanResult<()> {
         match self.advance() {
             // Single character tokens
             '(' => self.add_token(TokenType::LeftParen, None),
@@ -107,7 +108,7 @@ impl Scanner {
                             (Some('*'), Some('/')) => {
                                 self.advance();
                                 self.advance();
-                                opened = opened - 1;
+                                opened -= 1;
                                 if opened == 0 {
                                     break;
                                 }
@@ -116,10 +117,10 @@ impl Scanner {
                             (Some('/'), Some('*')) => {
                                 self.advance();
                                 self.advance();
-                                opened = opened + 1;
+                                opened -= 1;
                             }
                             (Some('\n'), _) => {
-                                self.line = self.line + 1;
+                                self.line -= 1;
                                 self.advance();
                             }
                             _ => {
@@ -132,9 +133,9 @@ impl Scanner {
                     if opened == 0 {
                         Ok(())
                     } else {
-                        Err(ScannerError::new(
+                        Err(ScanError::new(
                             self.line,
-                            ScannerErrorKind::UnterminatedBlockComment,
+                            ScanErrorKind::UnterminatedBlockComment,
                         ))
                     }
                 } else {
@@ -149,7 +150,7 @@ impl Scanner {
             ' ' | '\r' | '\t' => Ok(()),
 
             '\n' => {
-                self.line = self.line + 1;
+                self.line += 1;
                 Ok(())
             }
 
@@ -161,16 +162,16 @@ impl Scanner {
                 } else if Scanner::is_alpha(c) {
                     self.identifier()
                 } else {
-                    Err(ScannerError::new(
+                    Err(ScanError::new(
                         self.line,
-                        ScannerErrorKind::UnexpcetedCharacter,
+                        ScanErrorKind::UnexpcetedCharacter,
                     ))
                 }
             }
         }
     }
 
-    fn number(&mut self) -> Result<()> {
+    fn number(&mut self) -> ScanResult<()> {
         while let Some(c) = self.peek() {
             if !Scanner::is_digit(c) {
                 break;
@@ -208,7 +209,7 @@ impl Scanner {
         self.add_token(TokenType::Number, Some(number_literal))
     }
 
-    fn identifier(&mut self) -> Result<()> {
+    fn identifier(&mut self) -> ScanResult<()> {
         while let Some(c) = self.peek() {
             if !Scanner::is_alphanumeric(c) {
                 break;
@@ -259,24 +260,21 @@ impl Scanner {
         c.is_ascii_alphanumeric()
     }
 
-    fn string(&mut self) -> Result<()> {
+    fn string(&mut self) -> ScanResult<()> {
         while let Some(c) = self.peek() {
             if c == '"' || self.is_at_end() {
                 break;
             }
 
             if let Some('\n') = self.peek() {
-                self.line = self.line + 1;
+                self.line += 1;
             }
 
             self.advance();
         }
 
         if self.is_at_end() {
-            return Err(ScannerError::new(
-                self.line,
-                ScannerErrorKind::UnterminatedString,
-            ));
+            return Err(ScanError::new(self.line, ScanErrorKind::UnterminatedString));
         }
 
         // Consume the closing "
@@ -319,18 +317,18 @@ impl Scanner {
             return false;
         }
 
-        self.current = self.current + 1;
+        self.current += 1;
 
         true
     }
 
     fn advance(&mut self) -> char {
         let c = self.source.chars().nth(self.current).unwrap();
-        self.current = self.current + 1;
+        self.current += 1;
         c
     }
 
-    fn add_token(&mut self, token_type: TokenType, literal: Option<Literal>) -> Result<()> {
+    fn add_token(&mut self, token_type: TokenType, literal: Option<Literal>) -> ScanResult<()> {
         let lexeme_length = self.current - self.start;
         let lexeme = self
             .source
@@ -341,6 +339,41 @@ impl Scanner {
         self.tokens
             .push(Token::new(token_type, lexeme, literal, self.line));
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ScanError {
+    line: u32,
+    kind: ScanErrorKind,
+}
+
+impl ScanError {
+    pub fn new(line: u32, kind: ScanErrorKind) -> Self {
+        ScanError { line, kind }
+    }
+}
+
+impl fmt::Display for ScanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[line {}] Error: {}", self.line, self.kind)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ScanErrorKind {
+    UnexpcetedCharacter,
+    UnterminatedString,
+    UnterminatedBlockComment,
+}
+
+impl fmt::Display for ScanErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            Self::UnexpcetedCharacter => write!(f, "Unexpected character."),
+            Self::UnterminatedString => write!(f, "Unterminated string."),
+            Self::UnterminatedBlockComment => write!(f, "Unterminated block comment."),
+        }
     }
 }
 

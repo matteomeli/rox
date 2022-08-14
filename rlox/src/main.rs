@@ -1,34 +1,43 @@
 use std::{
+    cmp::Ordering,
     fs::File,
     io::{self, BufRead, Read, Write},
     process::exit,
 };
 
-use rlox::{scanner::Scanner, Result};
+use rlox::{
+    parser::{ParseResult, Parser},
+    printers::AstPrinter,
+    scanner::Scanner,
+};
 
 fn main() {
     let mut args = std::env::args();
-    if args.len() > 2 {
-        println!("Usage: rlox [script]");
-        exit(64);
-    } else if args.len() == 2 {
-        if let Err(err) = run_file(args.nth(1).unwrap()) {
-            eprintln!("{}", err);
-            exit(65);
+    match args.len().cmp(&2) {
+        Ordering::Greater => {
+            println!("Usage: rlox [script]");
+            exit(64);
         }
-    } else {
-        let _ = run_prompt();
+        Ordering::Equal => {
+            if let Err(err) = run_file(args.nth(1).unwrap()) {
+                eprintln!("{}", err);
+                exit(65);
+            }
+        }
+        _ => {
+            let _ = run_prompt();
+        }
     }
 }
 
-fn run_file(path: String) -> Result<()> {
+fn run_file(path: String) -> ParseResult<()> {
     let mut file = File::open(path).unwrap();
     let mut source = String::new();
     file.read_to_string(&mut source).unwrap();
     run(source)
 }
 
-fn run_prompt() -> Result<()> {
+fn run_prompt() -> ParseResult<()> {
     print!("> ");
     io::stdout().flush().unwrap();
     let stdin = io::stdin();
@@ -47,13 +56,12 @@ fn run_prompt() -> Result<()> {
     Ok(())
 }
 
-fn run(source: String) -> Result<()> {
+fn run(source: String) -> ParseResult<()> {
     let mut scanner = Scanner::new(source);
-    scanner.scan_tokens()?;
-
-    // For now just print the tokens
-    for token in scanner.tokens() {
-        println!("{:?}", token);
+    if let Ok(tokens) = scanner.scan_tokens() {
+        let mut parser = Parser::new(tokens.to_vec());
+        let expr = parser.parse()?;
+        println!("{}", AstPrinter.print(&expr));
     }
 
     Ok(())

@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum TokenType {
     // Single character tokens
     LeftParen,
@@ -50,14 +50,16 @@ pub enum TokenType {
     Eof,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Literal {
     String(String),
     Number(f64),
+    True,
+    False,
     Nil,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,

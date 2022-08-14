@@ -24,7 +24,7 @@ impl Visitor for RPNPrinter {
     }
 
     fn visit_grouping_expr(&mut self, grouping: &Grouping) -> Self::Result {
-        format!("{}", grouping.0.accept(self))
+        grouping.0.accept(self)
     }
 
     fn visit_literal_expr(&mut self, literal: &Literal) -> Self::Result {
@@ -32,6 +32,8 @@ impl Visitor for RPNPrinter {
             Literal::Nil => "nil".to_string(),
             Literal::String(s) => s.to_owned(),
             Literal::Number(n) => n.to_string(),
+            Literal::False => "false".to_string(),
+            Literal::True => "true".to_string(),
         }
     }
 
