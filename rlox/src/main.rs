@@ -59,6 +59,14 @@ fn run_prompt() -> ParseResult<()> {
 fn run(source: String) -> ParseResult<()> {
     let mut scanner = Scanner::new(source);
     if let Ok(tokens) = scanner.scan_tokens() {
+        // Print tokens
+        for token in tokens {
+            println!("{:?}", token);
+        }
+
+        println!();
+
+        // Parse tokens
         let mut parser = Parser::new(tokens.to_vec());
         let expr = parser.parse()?;
         println!("{}", AstPrinter.print(&expr));
