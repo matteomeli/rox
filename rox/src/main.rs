@@ -53,6 +53,7 @@ impl Rox {
     }
 
     fn run(&mut self, source: String) -> RoxResult {
+        // Scan source into tokens
         let mut scanner = Scanner::new(source);
         let tokens = scanner.scan_tokens()?;
 
@@ -62,13 +63,14 @@ impl Rox {
         // }
         //println!();
 
-        // Parse tokens
+        // Parse tokens into AST
         let mut parser = Parser::new(tokens.to_vec());
         let expr = parser.parse()?;
 
         // Print AST
         //println!("{}", AstPrinter.print(&expr));
 
+        // Interpret AST
         let result = self.interpreter.interpret(&expr);
         match result {
             Ok(result) => match result {
