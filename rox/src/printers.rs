@@ -1,6 +1,6 @@
 use crate::{
     ast::{Binary, Expr, Grouping, Unary, Visitor},
-    token::Literal,
+    types::Literal,
 };
 
 pub struct AstPrinter;

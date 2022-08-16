@@ -1,8 +1,9 @@
-use std::fmt;
+use std::{error::Error, fmt};
 
 use crate::{
     ast::{Binary, Expr, Grouping, Unary},
-    token::{Literal, Token, TokenType},
+    token::{Token, TokenType},
+    types::Literal,
 };
 
 pub type ParseResult<T> = std::result::Result<T, ParseError>;
@@ -28,7 +29,7 @@ impl Parser {
     fn equality(&mut self) -> ParseResult<Expr> {
         let mut expr = self.comparison()?;
 
-        while self.matches(&[TokenType::BangEqual, TokenType::EqualEqual]) {
+        while self.matches(&[TokenType::NotEqual, TokenType::EqualEqual]) {
             let operator = self.previous();
             let right = self.comparison()?;
             expr = Expr::Binary(Binary(Box::new(expr), operator, Box::new(right)));
@@ -206,12 +207,18 @@ pub struct ParseError {
     kind: ParseErrorKind,
 }
 
+impl Error for ParseError {}
+
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.token.token_type == TokenType::Eof {
-            write!(f, "[line {}] Error at end: {}", self.token.line, self.kind)
+            write!(
+                f,
+                "[line {}] Parse error at end: {}",
+                self.token.line, self.kind
+            )
         } else {
-            write!(f, "[line {}] Error: {}", self.token.line, self.kind)
+            write!(f, "[line {}] Parse error: {}", self.token.line, self.kind)
         }
     }
 }

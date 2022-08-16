@@ -1,3 +1,5 @@
+use crate::types::Literal;
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum TokenType {
     // Single character tokens
@@ -15,8 +17,8 @@ pub enum TokenType {
 
     // One or two character tokens
     Bang,
-    BangEqual,
     Equal,
+    NotEqual,
     EqualEqual,
     Greater,
     GreaterEqual,
@@ -48,15 +50,6 @@ pub enum TokenType {
 
     // End of file marker
     Eof,
-}
-
-#[derive(Debug, Clone)]
-pub enum Literal {
-    String(String),
-    Number(f64),
-    True,
-    False,
-    Nil,
 }
 
 #[derive(Debug, Clone)]

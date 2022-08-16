@@ -1,6 +1,8 @@
+use std::error::Error;
 use std::fmt;
 
-use crate::token::{Literal, Token, TokenType};
+use crate::token::{Token, TokenType};
+use crate::types::Literal;
 
 pub type ScanResult<T> = std::result::Result<T, ScanError>;
 
@@ -60,7 +62,7 @@ impl Scanner {
             // One or two character tokens
             '!' => {
                 if self.matches('=') {
-                    self.add_token(TokenType::BangEqual, None)
+                    self.add_token(TokenType::NotEqual, None)
                 } else {
                     self.add_token(TokenType::Bang, None)
                 }
@@ -354,9 +356,11 @@ impl ScanError {
     }
 }
 
+impl Error for ScanError {}
+
 impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[line {}] Error: {}", self.line, self.kind)
+        write!(f, "[line {}] Scan error: {}", self.line, self.kind)
     }
 }
 

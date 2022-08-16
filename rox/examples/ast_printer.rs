@@ -1,7 +1,8 @@
-use rlox::{
+use rox::{
     ast::{Binary, Expr, Grouping, Unary},
     printers::AstPrinter,
-    token::{Literal, Token, TokenType},
+    token::{Token, TokenType},
+    types::Literal,
 };
 
 fn main() {

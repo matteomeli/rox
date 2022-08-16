@@ -1,6 +1,7 @@
-use rlox::{
+use rox::{
     ast::{Binary, Expr, Grouping, Unary, Visitor},
-    token::{Literal, Token, TokenType},
+    token::{Token, TokenType},
+    types::Literal,
 };
 
 struct RPNPrinter;
