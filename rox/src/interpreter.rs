@@ -172,7 +172,13 @@ impl StatementVisitor for Interpreter {
     fn visit_stmt(&mut self, statement: &Statement) -> Self::Result {
         match statement {
             Statement::Expression(expression) => {
-                self.evaluate(expression)?;
+                let result = self.evaluate(expression)?;
+                match result {
+                    Type::Nil => println!("nil"),
+                    Type::Boolean(b) => println!("{}", b),
+                    Type::String(s) => println!("{}", s),
+                    Type::Number(n) => println!("{}", n),
+                }
                 Ok(())
             }
             Statement::Print(expression) => {

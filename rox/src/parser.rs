@@ -11,14 +11,30 @@ pub type ParseResult<T> = std::result::Result<T, ParseError>;
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
+    is_repl: bool,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, current: 0 }
+        Parser {
+            tokens,
+            current: 0,
+            is_repl: false,
+        }
     }
 
     pub fn parse(&mut self) -> ParseResult<Vec<Statement>> {
+        let mut statements = Vec::new();
+        while !self.is_at_end() {
+            statements.push(self.declaration()?);
+        }
+
+        Ok(statements)
+    }
+
+    pub fn parse_repl(&mut self) -> ParseResult<Vec<Statement>> {
+        self.is_repl = true;
+
         let mut statements = Vec::new();
         while !self.is_at_end() {
             statements.push(self.declaration()?);
@@ -48,11 +64,11 @@ impl Parser {
             None
         };
 
-        let _ = self.consume(
+        self.consume(
             TokenType::Semicolon,
             ParseErrorKind::ExpectedSemicolonAfterVarDeclaration,
-        );
-        Ok(Statement::var(name, initializer))
+        )
+        .map(|_| Statement::var(name, initializer))
     }
 
     fn statement(&mut self) -> ParseResult<Statement> {
@@ -90,11 +106,14 @@ impl Parser {
 
     fn expr_statement(&mut self) -> ParseResult<Statement> {
         let expression = self.expression()?;
-        self.consume(
+        match self.consume(
             TokenType::Semicolon,
             ParseErrorKind::ExpectedSemicolonAfterExpression,
-        )
-        .map(|_| Statement::expression(expression))
+        ) {
+            Ok(_) => Ok(Statement::expression(expression)),
+            Err(_) if self.is_repl && self.is_at_end() => Ok(Statement::expression(expression)),
+            Err(err) => Err(err),
+        }
     }
 
     fn expression(&mut self) -> ParseResult<Expression> {

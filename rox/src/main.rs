@@ -7,6 +7,7 @@ use std::{
 };
 
 use rox::{
+    ast::Statement,
     interpreter::{InterpretError, Interpreter},
     parser::Parser,
     scanner::Scanner,
@@ -26,7 +27,7 @@ impl Rox {
 
         file.read_to_string(&mut source).unwrap();
 
-        self.run(source)
+        self.run(source, false)
     }
 
     fn run_prompt(&mut self) -> RoxResult {
@@ -37,7 +38,7 @@ impl Rox {
         for line in stdin.lock().lines() {
             match line {
                 Ok(line) => {
-                    if let Err(err) = self.run(line) {
+                    if let Err(err) = self.run(line, true) {
                         eprintln!("{}", err);
                     }
                 }
@@ -51,14 +52,18 @@ impl Rox {
         Ok(())
     }
 
-    fn run(&mut self, source: String) -> RoxResult {
+    fn run(&mut self, source: String, is_repl: bool) -> RoxResult {
         // Scan source into tokens
         let mut scanner = Scanner::new(source);
         let tokens = scanner.scan_tokens()?;
 
         // Parse tokens into AST
         let mut parser = Parser::new(tokens.to_vec());
-        let statements = parser.parse()?;
+        let statements = if is_repl {
+            parser.parse_repl()?
+        } else {
+            parser.parse()?
+        };
 
         // Interpret AST
         self.interpreter.interpret(&statements)?;
