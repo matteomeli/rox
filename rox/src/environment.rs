@@ -25,13 +25,13 @@ impl Environment {
         }
     }
 
-    pub fn define(&mut self, name: String, value: Type) {
+    pub fn define(&mut self, name: String, value: Option<Type>) {
         if let Some(env) = &self.cactus.node {
             env.val.borrow_mut().define(name, value);
         }
     }
 
-    pub fn get(&self, name: &Token) -> Option<Type> {
+    pub fn get(&self, name: &Token) -> Option<Option<Type>> {
         for env in self.cactus.values() {
             if let Some(value) = env.borrow().get(name) {
                 return Some(value);
@@ -58,22 +58,22 @@ impl Default for Environment {
 
 #[derive(Default)]
 pub struct EnvironmentNode {
-    values: HashMap<String, Type>,
+    values: HashMap<String, Option<Type>>,
 }
 
 impl EnvironmentNode {
-    pub fn define(&mut self, name: String, value: Type) {
+    pub fn define(&mut self, name: String, value: Option<Type>) {
         self.values.insert(name, value);
     }
 
-    pub fn get(&self, name: &Token) -> Option<Type> {
+    pub fn get(&self, name: &Token) -> Option<Option<Type>> {
         self.values.get(&name.lexeme).cloned()
     }
 
     pub fn assign(&mut self, name: &Token, new_value: &Type) -> bool {
         match self.values.get_mut(&name.lexeme) {
             Some(value) => {
-                *value = new_value.clone();
+                *value = Some(new_value.clone());
                 true
             }
             None => false,

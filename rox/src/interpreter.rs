@@ -146,7 +146,14 @@ impl ExpressionVisitor for Interpreter {
                 }
             }
             Expression::Variable { name } => match self.environment.get(name) {
-                Some(value) => Ok(value),
+                Some(Some(value)) => Ok(value),
+                Some(None) => Err(InterpretError {
+                    token: name.clone(),
+                    message: format!(
+                        "Variable '{}' must be initialized before use.",
+                        &name.lexeme
+                    ),
+                }),
                 None => Err(InterpretError {
                     token: name.clone(),
                     message: format!("Undefined variable '{}'.", &name.lexeme),
@@ -194,8 +201,8 @@ impl StatementVisitor for Interpreter {
             }
             Statement::Var { name, initializer } => {
                 let value = match initializer {
-                    Some(expression) => self.evaluate(expression)?,
-                    None => Type::Nil,
+                    Some(expression) => Some(self.evaluate(expression)?),
+                    None => None,
                 };
                 self.environment.define(name.lexeme.clone(), value);
 
