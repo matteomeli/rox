@@ -10,7 +10,6 @@ use rox::{
     interpreter::{InterpretError, Interpreter},
     parser::Parser,
     scanner::Scanner,
-    types::Type,
 };
 
 type RoxResult = Result<(), Box<dyn Error>>;
@@ -57,30 +56,12 @@ impl Rox {
         let mut scanner = Scanner::new(source);
         let tokens = scanner.scan_tokens()?;
 
-        // Print tokens
-        // for token in tokens {
-        //     println!("{:?}", token);
-        // }
-        //println!();
-
         // Parse tokens into AST
         let mut parser = Parser::new(tokens.to_vec());
-        let expr = parser.parse()?;
-
-        // Print AST
-        //println!("{}", AstPrinter.print(&expr));
+        let statements = parser.parse()?;
 
         // Interpret AST
-        let result = self.interpreter.interpret(&expr);
-        match result {
-            Ok(result) => match result {
-                Type::Nil => println!("nil"),
-                Type::Boolean(b) => println!("{}", b),
-                Type::String(s) => println!("{}", s),
-                Type::Number(n) => println!("{}", n),
-            },
-            Err(error) => eprintln!("{}", error),
-        }
+        self.interpreter.interpret(&statements)?;
 
         Ok(())
     }

@@ -1,7 +1,7 @@
 use std::{error::Error, fmt};
 
 use crate::{
-    ast::{Binary, Expr, Grouping, Unary},
+    ast::{Expression, Statement},
     token::{Token, TokenType},
     types::Literal,
 };
@@ -18,28 +18,123 @@ impl Parser {
         Parser { tokens, current: 0 }
     }
 
-    pub fn parse(&mut self) -> ParseResult<Expr> {
-        self.expression()
+    pub fn parse(&mut self) -> ParseResult<Vec<Statement>> {
+        let mut statements = Vec::new();
+        while !self.is_at_end() {
+            statements.push(self.declaration()?);
+        }
+
+        Ok(statements)
     }
 
-    fn expression(&mut self) -> ParseResult<Expr> {
-        self.equality()
+    fn declaration(&mut self) -> ParseResult<Statement> {
+        let result = if self.matches(&[TokenType::Var]) {
+            self.var_declaration()
+        } else {
+            self.statement()
+        };
+        result.inspect_err(|err| {
+            if err.should_synchronize() {
+                self.synchronize()
+            }
+        })
     }
 
-    fn equality(&mut self) -> ParseResult<Expr> {
-        let mut expr = self.comparison()?;
+    fn var_declaration(&mut self) -> ParseResult<Statement> {
+        let name = self.consume(TokenType::Identifier, ParseErrorKind::ExpectedVariableName)?;
+        let initializer = if self.matches(&[TokenType::Equal]) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+
+        let _ = self.consume(
+            TokenType::Semicolon,
+            ParseErrorKind::ExpectedSemicolonAfterVarDeclaration,
+        );
+        Ok(Statement::var(name, initializer))
+    }
+
+    fn statement(&mut self) -> ParseResult<Statement> {
+        if self.matches(&[TokenType::Print]) {
+            self.print_statement()
+        } else if self.matches(&[TokenType::LeftBrace]) {
+            self.block()
+        } else {
+            self.expr_statement()
+        }
+    }
+
+    fn print_statement(&mut self) -> ParseResult<Statement> {
+        let expression = self.expression()?;
+        self.consume(
+            TokenType::Semicolon,
+            ParseErrorKind::ExpectedSemicolonAfterValue,
+        )
+        .map(|_| Statement::print(expression))
+    }
+
+    fn block(&mut self) -> ParseResult<Statement> {
+        let mut statements = Vec::new();
+
+        while !self.check(TokenType::RightBrace) && !self.is_at_end() {
+            statements.push(self.declaration()?);
+        }
+
+        self.consume(
+            TokenType::RightBrace,
+            ParseErrorKind::ExpectedRightBraceAfterBlock,
+        )
+        .map(|_| Statement::block(statements))
+    }
+
+    fn expr_statement(&mut self) -> ParseResult<Statement> {
+        let expression = self.expression()?;
+        self.consume(
+            TokenType::Semicolon,
+            ParseErrorKind::ExpectedSemicolonAfterExpression,
+        )
+        .map(|_| Statement::expression(expression))
+    }
+
+    fn expression(&mut self) -> ParseResult<Expression> {
+        self.assignment()
+    }
+
+    fn assignment(&mut self) -> ParseResult<Expression> {
+        let expression = self.equality()?;
+
+        if self.matches(&[TokenType::Equal]) {
+            let equals = self.previous();
+            let value = self.assignment()?;
+
+            if let Expression::Variable { name } = expression {
+                return Ok(Expression::assign(name, Box::new(value)));
+            }
+
+            return Err(ParseError {
+                token: equals,
+                kind: ParseErrorKind::InvalidAssignmentTarget,
+            });
+        }
+
+        Ok(expression)
+    }
+
+    fn equality(&mut self) -> ParseResult<Expression> {
+        let mut left = self.comparison()?;
 
         while self.matches(&[TokenType::NotEqual, TokenType::EqualEqual]) {
             let operator = self.previous();
             let right = self.comparison()?;
-            expr = Expr::Binary(Binary(Box::new(expr), operator, Box::new(right)));
+            left = Expression::binary(Box::new(left), operator, Box::new(right));
         }
 
-        Ok(expr)
+        Ok(left)
     }
 
-    fn comparison(&mut self) -> ParseResult<Expr> {
-        let mut expr = self.term()?;
+    fn comparison(&mut self) -> ParseResult<Expression> {
+        let mut left = self.term()?;
 
         while self.matches(&[
             TokenType::Greater,
@@ -49,71 +144,75 @@ impl Parser {
         ]) {
             let operator = self.previous();
             let right = self.term()?;
-            expr = Expr::Binary(Binary(Box::new(expr), operator, Box::new(right)));
+            left = Expression::binary(Box::new(left), operator, Box::new(right));
         }
 
-        Ok(expr)
+        Ok(left)
     }
 
-    fn term(&mut self) -> ParseResult<Expr> {
-        let mut expr = self.factor()?;
+    fn term(&mut self) -> ParseResult<Expression> {
+        let mut left = self.factor()?;
 
         while self.matches(&[TokenType::Minus, TokenType::Plus]) {
             let operator = self.previous();
             let right = self.factor()?;
-            expr = Expr::Binary(Binary(Box::new(expr), operator, Box::new(right)));
+            left = Expression::binary(Box::new(left), operator, Box::new(right));
         }
 
-        Ok(expr)
+        Ok(left)
     }
 
-    fn factor(&mut self) -> ParseResult<Expr> {
-        let mut expr = self.unary()?;
+    fn factor(&mut self) -> ParseResult<Expression> {
+        let mut left = self.unary()?;
 
         while self.matches(&[TokenType::Slash, TokenType::Star]) {
             let operator = self.previous();
             let right = self.unary()?;
-            expr = Expr::Binary(Binary(Box::new(expr), operator, Box::new(right)));
+            left = Expression::binary(Box::new(left), operator, Box::new(right));
         }
 
-        Ok(expr)
+        Ok(left)
     }
 
-    fn unary(&mut self) -> ParseResult<Expr> {
+    fn unary(&mut self) -> ParseResult<Expression> {
         if self.matches(&[TokenType::Bang, TokenType::Minus]) {
             let operator = self.previous();
             let right = self.unary()?;
-            return Ok(Expr::Unary(Unary(operator, Box::new(right))));
+            return Ok(Expression::unary(operator, Box::new(right)));
         }
 
         self.primary()
     }
 
-    fn primary(&mut self) -> ParseResult<Expr> {
+    fn primary(&mut self) -> ParseResult<Expression> {
         if self.matches(&[TokenType::True]) {
-            return Ok(Expr::Literal(Literal::True));
+            return Ok(Expression::literal(Literal::True));
         }
 
         if self.matches(&[TokenType::False]) {
-            return Ok(Expr::Literal(Literal::False));
+            return Ok(Expression::literal(Literal::False));
         }
 
         if self.matches(&[TokenType::Nil]) {
-            return Ok(Expr::Literal(Literal::Nil));
+            return Ok(Expression::literal(Literal::Nil));
         }
 
         if self.matches(&[TokenType::Number, TokenType::String]) {
-            return Ok(Expr::Literal(self.previous().literal.unwrap()));
+            return Ok(Expression::literal(self.previous().literal.unwrap()));
+        }
+
+        if self.matches(&[TokenType::Identifier]) {
+            return Ok(Expression::variable(self.previous()));
         }
 
         if self.matches(&[TokenType::LeftParen]) {
-            let expr = self.expression()?;
+            let expression = self.expression()?;
             return self
                 .consume(
                     TokenType::RightParen,
                     ParseErrorKind::ExpectedRightParenthesis,
                 )
-                .map(|_| Expr::Grouping(Grouping(Box::new(expr))));
+                .map(|_| Expression::grouping(Box::new(expression)));
         }
 
         Err(ParseError {
@@ -207,6 +306,12 @@ pub struct ParseError {
     kind: ParseErrorKind,
 }
 
+impl ParseError {
+    pub fn should_synchronize(&self) -> bool {
+        !matches!(self.kind, ParseErrorKind::InvalidAssignmentTarget)
+    }
+}
+
 impl Error for ParseError {}
 
 impl fmt::Display for ParseError {
@@ -227,6 +332,12 @@ impl fmt::Display for ParseError {
 pub enum ParseErrorKind {
     ExpectedExpression,
     ExpectedRightParenthesis,
+    ExpectedSemicolonAfterValue,
+    ExpectedSemicolonAfterExpression,
+    ExpectedVariableName,
+    ExpectedSemicolonAfterVarDeclaration,
+    InvalidAssignmentTarget,
+    ExpectedRightBraceAfterBlock,
 }
 
 impl fmt::Display for ParseErrorKind {
@@ -234,6 +345,16 @@ impl fmt::Display for ParseErrorKind {
         match &self {
             Self::ExpectedExpression => write!(f, "Expected expression."),
             Self::ExpectedRightParenthesis => write!(f, "Expected ')' after expression."),
+            Self::ExpectedSemicolonAfterValue => write!(f, "Expected ';' after value."),
+            Self::ExpectedSemicolonAfterExpression => write!(f, "Expected ';' after expression."),
+            Self::ExpectedVariableName => write!(f, "Expected variable name."),
+            Self::ExpectedSemicolonAfterVarDeclaration => {
+                write!(f, "Expected ';' after variable declaration.")
+            }
+            Self::InvalidAssignmentTarget => {
+                write!(f, "Invalid assignment target.")
+            }
+            Self::ExpectedRightBraceAfterBlock => write!(f, "Expected '}}' after block."),
         }
     }
 }

@@ -95,9 +95,9 @@
         {
             "type": "cppvsdbg",
             "request": "launch",
-            "name": "(Windows) Launch with file",
+            "name": "(Windows) Launch with test file",
             "program": "${workspaceRoot}/target/debug/rox.exe",
-            "args": ["${workspaceRoot}/test.lox"],
+            "args": ["${workspaceRoot}/test.rox"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "sourceFileMap": {

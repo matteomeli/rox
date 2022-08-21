@@ -1,21 +1,21 @@
 use rox::{
-    ast::{Binary, Expr, Grouping, Unary},
+    ast::Expression,
     printers::AstPrinter,
     token::{Token, TokenType},
     types::Literal,
 };
 
 fn main() {
-    let e = Expr::Binary(Binary(
-        Box::new(Expr::Unary(Unary(
+    let e = Expression::binary(
+        Box::new(Expression::unary(
             Token::new(TokenType::Minus, "-".to_string(), None, 1),
-            Box::new(Expr::Literal(Literal::Number(123.0))),
-        ))),
+            Box::new(Expression::literal(Literal::Number(123.0))),
+        )),
         Token::new(TokenType::Star, "*".to_string(), None, 1),
-        Box::new(Expr::Grouping(Grouping(Box::new(Expr::Literal(
+        Box::new(Expression::grouping(Box::new(Expression::literal(
             Literal::Number(45.67),
-        ))))),
-    ));
+        )))),
+    );
 
     println!("{}", AstPrinter.print(&e));
 }
