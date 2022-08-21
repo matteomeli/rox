@@ -7,7 +7,6 @@ use std::{
 };
 
 use rox::{
-    ast::Statement,
     interpreter::{InterpretError, Interpreter},
     parser::Parser,
     scanner::Scanner,
