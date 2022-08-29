@@ -48,6 +48,7 @@ pub enum TokenType {
     Var,
     While,
     Break,
+    Continue,
 
     // End of file marker
     Eof,

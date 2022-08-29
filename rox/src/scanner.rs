@@ -245,6 +245,7 @@ impl Scanner {
             "var" => TokenType::Var,
             "while" => TokenType::While,
             "break" => TokenType::Break,
+            "continue" => TokenType::Continue,
             _ => TokenType::Identifier,
         };
 

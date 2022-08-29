@@ -92,6 +92,7 @@ pub enum Statement {
         statements: Vec<Statement>,
     },
     Break,
+    Continue,
     Expression(Expression),
     If {
         condition: Expression,
@@ -116,6 +117,10 @@ impl Statement {
 
     pub fn r#break() -> Self {
         Statement::Break
+    }
+
+    pub fn r#continue() -> Self {
+        Statement::Continue
     }
 
     pub fn expression(expression: Expression) -> Self {

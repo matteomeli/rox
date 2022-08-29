@@ -70,6 +70,8 @@ impl Parser {
     fn statement(&mut self) -> ParseResult<Statement> {
         if self.matches(&[TokenType::Break]) {
             self.break_statement()
+        } else if self.matches(&[TokenType::Continue]) {
+            self.continue_statement()
         } else if self.matches(&[TokenType::For]) {
             self.loop_depth += 1;
             let for_statement = self.for_statement();
@@ -101,9 +103,24 @@ impl Parser {
 
         self.consume(
             TokenType::Semicolon,
-            ParseErrorKind::ExpectedSemicolonAfterValue,
+            ParseErrorKind::ExpectedSemicolonAfterBreak,
         )
         .map(|_| Statement::r#break())
+    }
+
+    fn continue_statement(&mut self) -> ParseResult<Statement> {
+        if self.loop_depth == 0 {
+            return Err(ParseError {
+                token: self.previous(),
+                kind: ParseErrorKind::ExpectedEnclosingLoopToContinue,
+            });
+        }
+
+        self.consume(
+            TokenType::Semicolon,
+            ParseErrorKind::ExpectedSemicolonAfterContinue,
+        )
+        .map(|_| Statement::r#continue())
     }
 
     fn for_statement(&mut self) -> ParseResult<Statement> {
@@ -141,21 +158,13 @@ impl Parser {
                 ParseErrorKind::ExpectedRightParenAfterForClauses,
             )?;
 
-            let body = self.statement()?;
-            let while_body = if let Some(inc) = increment {
-                let inc_statement = Statement::expression(inc);
-                match body {
-                    Statement::Block { mut statements } => {
-                        statements.push(inc_statement);
-                        Statement::block(statements)
-                    }
-                    _ => Statement::block(vec![body, inc_statement]),
-                }
+            let body = if let Some(inc) = increment {
+                Statement::block(vec![self.statement()?, Statement::expression(inc)])
             } else {
-                body
+                self.statement()?
             };
 
-            Statement::r#while(condition, Box::new(while_body))
+            Statement::r#while(condition, Box::new(body))
         };
 
         // Desugar for syntax into while construct
@@ -518,6 +527,8 @@ pub enum ParseErrorKind {
     ExpectedRightParenAfterForClauses,
     ExpectedSemicolonAfterBreak,
     ExpectedEnclosingLoopToBreak,
+    ExpectedSemicolonAfterContinue,
+    ExpectedEnclosingLoopToContinue,
 }
 
 impl fmt::Display for ParseErrorKind {
@@ -550,6 +561,12 @@ impl fmt::Display for ParseErrorKind {
             }
             Self::ExpectedEnclosingLoopToBreak => {
                 write!(f, "Must be inside loop to use 'break'.")
+            }
+            Self::ExpectedSemicolonAfterContinue => {
+                write!(f, "Expected ';' after 'continue'.")
+            }
+            Self::ExpectedEnclosingLoopToContinue => {
+                write!(f, "Must be inside loop to use 'continue'.")
             }
         }
     }

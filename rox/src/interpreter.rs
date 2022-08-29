@@ -198,7 +198,9 @@ impl StatementVisitor for Interpreter {
                 self.environment.push();
                 for statement in statements {
                     match self.execute(statement) {
-                        result @ Err(_) | result @ Ok(ExecutionResult::Break) => {
+                        result @ Err(_)
+                        | result @ Ok(ExecutionResult::Break)
+                        | result @ Ok(ExecutionResult::Continue) => {
                             self.environment.pop();
                             return result;
                         }
@@ -210,6 +212,7 @@ impl StatementVisitor for Interpreter {
                 Ok(ExecutionResult::Success)
             }
             Statement::Break => Ok(ExecutionResult::Break),
+            Statement::Continue => Ok(ExecutionResult::Continue),
             Statement::Expression(expression) => {
                 self.evaluate(expression)?;
                 Ok(ExecutionResult::Success)
@@ -250,8 +253,35 @@ impl StatementVisitor for Interpreter {
             }
             Statement::While { condition, body } => {
                 while self.evaluate(condition)?.is_truthy() {
-                    if self.execute(body)? == ExecutionResult::Break {
-                        break;
+                    if let Statement::Block { ref statements } = body.as_ref() {
+                        match &statements[..] {
+                            // For loops are desugared by the [Parser] as while loops containing an "artificial" enclosing block
+                            // which in turn contains two statements: the original for-loop's block plus the increment statement, if any.
+                            // This structure is important to consider when implementing `continue` as the increment statememnt has to always run,
+                            // even when one of the statements in the for-loop's (desugared as while) block requests to continue to
+                            // the next iteration and skip the remainder statements of this one. Below is where this special case is handled.
+                            [block @ Statement::Block { .. }, increment @ Statement::Expression(_)] =>
+                            {
+                                let result = self.execute(block)?;
+                                // When executing `block`, any statemement can produce a `continue` or a `break`,
+                                // skipping any statement that would follow in the block.
+                                // We want to make sure the increment statement is always executed,
+                                // so `continue` can safely jump to the next iteration.
+                                self.execute(increment)?;
+                                // In case of `break` was produced we instead exit the whole while loop.
+                                if result == ExecutionResult::Break {
+                                    break;
+                                }
+                            }
+                            _ => {
+                                let res = self.execute(body)?;
+                                if res == ExecutionResult::Break {
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        self.execute(body)?;
                     }
                 }
 
@@ -264,6 +294,7 @@ impl StatementVisitor for Interpreter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecutionResult {
     Break,
+    Continue,
     Success,
 }
 
