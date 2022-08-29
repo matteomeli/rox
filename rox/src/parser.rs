@@ -12,6 +12,7 @@ pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
     is_repl: bool,
+    loop_depth: u32,
 }
 
 impl Parser {
@@ -20,6 +21,7 @@ impl Parser {
             tokens,
             current: 0,
             is_repl: false,
+            loop_depth: 0,
         }
     }
 
@@ -66,19 +68,42 @@ impl Parser {
     }
 
     fn statement(&mut self) -> ParseResult<Statement> {
-        if self.matches(&[TokenType::For]) {
-            self.for_statement()
+        if self.matches(&[TokenType::Break]) {
+            self.break_statement()
+        } else if self.matches(&[TokenType::For]) {
+            self.loop_depth += 1;
+            let for_statement = self.for_statement();
+            self.loop_depth -= 1;
+            for_statement
         } else if self.matches(&[TokenType::If]) {
             self.if_statement()
         } else if self.matches(&[TokenType::Print]) {
             self.print_statement()
         } else if self.matches(&[TokenType::While]) {
-            self.while_statement()
+            self.loop_depth += 1;
+            let while_statement = self.while_statement();
+            self.loop_depth -= 1;
+            while_statement
         } else if self.matches(&[TokenType::LeftBrace]) {
             self.block()
         } else {
             self.expr_statement()
         }
+    }
+
+    fn break_statement(&mut self) -> ParseResult<Statement> {
+        if self.loop_depth == 0 {
+            return Err(ParseError {
+                token: self.previous(),
+                kind: ParseErrorKind::ExpectedEnclosingLoopToBreak,
+            });
+        }
+
+        self.consume(
+            TokenType::Semicolon,
+            ParseErrorKind::ExpectedSemicolonAfterValue,
+        )
+        .map(|_| Statement::r#break())
     }
 
     fn for_statement(&mut self) -> ParseResult<Statement> {
@@ -106,25 +131,31 @@ impl Parser {
                 ParseErrorKind::ExpectedSemicolonAfterForCondition,
             )?;
 
-            let body = {
-                let increment = if !self.check(TokenType::RightParen) {
-                    Some(self.expression()?)
-                } else {
-                    None
-                };
-                self.consume(
-                    TokenType::RightParen,
-                    ParseErrorKind::ExpectedRightParenAfterForClauses,
-                )?;
+            let increment = if !self.check(TokenType::RightParen) {
+                Some(self.expression()?)
+            } else {
+                None
+            };
+            self.consume(
+                TokenType::RightParen,
+                ParseErrorKind::ExpectedRightParenAfterForClauses,
+            )?;
 
-                if let Some(inc) = increment {
-                    Statement::block(vec![self.statement()?, Statement::expression(inc)])
-                } else {
-                    self.statement()?
+            let body = self.statement()?;
+            let while_body = if let Some(inc) = increment {
+                let inc_statement = Statement::expression(inc);
+                match body {
+                    Statement::Block { mut statements } => {
+                        statements.push(inc_statement);
+                        Statement::block(statements)
+                    }
+                    _ => Statement::block(vec![body, inc_statement]),
                 }
+            } else {
+                body
             };
 
-            Statement::r#while(condition, Box::new(body))
+            Statement::r#while(condition, Box::new(while_body))
         };
 
         // Desugar for syntax into while construct
@@ -485,6 +516,8 @@ pub enum ParseErrorKind {
     ExpectedLeftParenAfterFor,
     ExpectedSemicolonAfterForCondition,
     ExpectedRightParenAfterForClauses,
+    ExpectedSemicolonAfterBreak,
+    ExpectedEnclosingLoopToBreak,
 }
 
 impl fmt::Display for ParseErrorKind {
@@ -511,6 +544,12 @@ impl fmt::Display for ParseErrorKind {
             }
             Self::ExpectedRightParenAfterForClauses => {
                 write!(f, "Expected ')' after 'for' clauses.")
+            }
+            Self::ExpectedSemicolonAfterBreak => {
+                write!(f, "Expected ';' after 'break'.")
+            }
+            Self::ExpectedEnclosingLoopToBreak => {
+                write!(f, "Must be inside loop to use 'break'.")
             }
         }
     }

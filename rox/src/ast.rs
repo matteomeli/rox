@@ -91,6 +91,7 @@ pub enum Statement {
     Block {
         statements: Vec<Statement>,
     },
+    Break,
     Expression(Expression),
     If {
         condition: Expression,
@@ -111,6 +112,10 @@ pub enum Statement {
 impl Statement {
     pub fn block(statements: Vec<Statement>) -> Self {
         Statement::Block { statements }
+    }
+
+    pub fn r#break() -> Self {
+        Statement::Break
     }
 
     pub fn expression(expression: Expression) -> Self {

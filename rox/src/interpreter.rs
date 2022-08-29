@@ -39,14 +39,16 @@ impl Interpreter {
                         Type::Number(n) => println!("{}", n),
                     }
                 }
-                _ => self.execute(last)?,
+                _ => {
+                    self.execute(last)?;
+                }
             }
         }
 
         Ok(())
     }
 
-    fn execute(&mut self, statement: &Statement) -> InterpretResult<()> {
+    fn execute(&mut self, statement: &Statement) -> InterpretResult<ExecutionResult> {
         statement.accept(self)
     }
 
@@ -82,41 +84,32 @@ impl ExpressionVisitor for Interpreter {
                         TokenType::NotEqual => Ok(Type::Boolean(ln != rn)),
                         _ => Err(InterpretError {
                             token: operator.clone(),
-                            message: format!(
-                                "Invalid operands type for {} operator.",
-                                operator.lexeme
-                            ),
+                            kind: InterpretErrorKind::InvalidOperandsForBinaryOpeator,
                         }),
                     },
-                    (Type::String(mut ls), TokenType::Plus, Type::String(rs)) => {
-                        ls.push_str(&rs);
-                        Ok(Type::String(ls))
-                    }
+                    (Type::String(mut ls), op, Type::String(rs)) => match op {
+                        TokenType::EqualEqual => Ok(Type::Boolean(ls == rs)),
+                        TokenType::NotEqual => Ok(Type::Boolean(ls != rs)),
+                        TokenType::Plus => {
+                            ls.push_str(&rs);
+                            Ok(Type::String(ls))
+                        }
+                        _ => Err(InterpretError {
+                            token: operator.clone(),
+                            kind: InterpretErrorKind::InvalidBinaryOperatorForStringOperands,
+                        }),
+                    },
                     (Type::String(mut s), TokenType::Plus, Type::Number(n))
                     | (Type::Number(n), TokenType::Plus, Type::String(mut s)) => {
                         let _ = write!(s, "{}", n);
                         Ok(Type::String(s))
                     }
-                    (Type::String(ls), op, Type::String(rs)) => match op {
-                        TokenType::EqualEqual => Ok(Type::Boolean(ls == rs)),
-                        TokenType::NotEqual => Ok(Type::Boolean(ls != rs)),
-                        _ => Err(InterpretError {
-                            token: operator.clone(),
-                            message: format!(
-                                "Cannot use {} operator for string values.",
-                                operator.lexeme
-                            ),
-                        }),
-                    },
                     (Type::Boolean(lb), op, Type::Boolean(rb)) => match op {
                         TokenType::EqualEqual => Ok(Type::Boolean(lb == rb)),
                         TokenType::NotEqual => Ok(Type::Boolean(lb != rb)),
                         _ => Err(InterpretError {
                             token: operator.clone(),
-                            message: format!(
-                                "Cannot use {} operator for boolean values.",
-                                operator.lexeme
-                            ),
+                            kind: InterpretErrorKind::InvalidBinaryOperatorForBooleanOperands,
                         }),
                     },
                     (Type::Nil, op, Type::Nil) => match op {
@@ -124,17 +117,14 @@ impl ExpressionVisitor for Interpreter {
                         TokenType::NotEqual => Ok(Type::Boolean(false)),
                         _ => Err(InterpretError {
                             token: operator.clone(),
-                            message: format!(
-                                "Cannot use {} operator for nil values.",
-                                operator.lexeme
-                            ),
+                            kind: InterpretErrorKind::InvalidBinaryOperatorForNilOperands,
                         }),
                     },
                     (Type::Nil, TokenType::EqualEqual, _) => Ok(Type::Boolean(false)),
                     (Type::Nil, TokenType::NotEqual, _) => Ok(Type::Boolean(true)),
                     _ => Err(InterpretError {
                         token: operator.clone(),
-                        message: "Invalid binary expresion.".to_string(),
+                        kind: InterpretErrorKind::InvalidBinaryExpression,
                     }),
                 }
             }
@@ -170,7 +160,7 @@ impl ExpressionVisitor for Interpreter {
                     (TokenType::Bang, value) => Ok(Type::Boolean(!value.is_truthy())),
                     _ => Err(InterpretError {
                         token: operator.clone(),
-                        message: "Invalid unary expression.".to_string(),
+                        kind: InterpretErrorKind::InvalidUnaryExpression,
                     }),
                 }
             }
@@ -178,14 +168,11 @@ impl ExpressionVisitor for Interpreter {
                 Some(Some(value)) => Ok(value),
                 Some(None) => Err(InterpretError {
                     token: name.clone(),
-                    message: format!(
-                        "Variable '{}' must be initialized before use.",
-                        &name.lexeme
-                    ),
+                    kind: InterpretErrorKind::UninitializedVariable,
                 }),
                 None => Err(InterpretError {
                     token: name.clone(),
-                    message: format!("Undefined variable '{}'.", &name.lexeme),
+                    kind: InterpretErrorKind::UninitializedVariable,
                 }),
             },
             Expression::Assign { name, value } => {
@@ -193,7 +180,7 @@ impl ExpressionVisitor for Interpreter {
                 if !self.environment.assign(name, value.clone()) {
                     return Err(InterpretError {
                         token: name.clone(),
-                        message: format!("Undefined variable '{}'.", &name.lexeme),
+                        kind: InterpretErrorKind::UninitializedVariable,
                     });
                 }
                 Ok(value)
@@ -203,23 +190,29 @@ impl ExpressionVisitor for Interpreter {
 }
 
 impl StatementVisitor for Interpreter {
-    type Result = InterpretResult<()>;
+    type Result = InterpretResult<ExecutionResult>;
 
     fn visit_stmt(&mut self, statement: &Statement) -> Self::Result {
         match statement {
             Statement::Block { statements } => {
                 self.environment.push();
                 for statement in statements {
-                    self.execute(statement)
-                        .inspect_err(|_| self.environment.pop())?;
+                    match self.execute(statement) {
+                        result @ Err(_) | result @ Ok(ExecutionResult::Break) => {
+                            self.environment.pop();
+                            return result;
+                        }
+                        _ => (),
+                    }
                 }
                 self.environment.pop();
 
-                Ok(())
+                Ok(ExecutionResult::Success)
             }
+            Statement::Break => Ok(ExecutionResult::Break),
             Statement::Expression(expression) => {
                 self.evaluate(expression)?;
-                Ok(())
+                Ok(ExecutionResult::Success)
             }
             Statement::If {
                 condition,
@@ -228,11 +221,12 @@ impl StatementVisitor for Interpreter {
             } => {
                 let cond = self.evaluate(condition)?;
                 if cond.is_truthy() {
-                    self.execute(then_branch)?;
+                    self.execute(then_branch)
                 } else if let Some(else_branch) = else_branch {
-                    self.execute(else_branch)?;
-                };
-                Ok(())
+                    self.execute(else_branch)
+                } else {
+                    Ok(ExecutionResult::Success)
+                }
             }
             Statement::Print(expression) => {
                 let result = self.evaluate(expression)?;
@@ -243,7 +237,7 @@ impl StatementVisitor for Interpreter {
                     Type::Number(n) => println!("{}", n),
                 }
 
-                Ok(())
+                Ok(ExecutionResult::Success)
             }
             Statement::Var { name, initializer } => {
                 let value = match initializer {
@@ -252,33 +246,90 @@ impl StatementVisitor for Interpreter {
                 };
                 self.environment.define(name.lexeme.clone(), value);
 
-                Ok(())
+                Ok(ExecutionResult::Success)
             }
             Statement::While { condition, body } => {
                 while self.evaluate(condition)?.is_truthy() {
-                    self.execute(body)?;
+                    if self.execute(body)? == ExecutionResult::Break {
+                        break;
+                    }
                 }
 
-                Ok(())
+                Ok(ExecutionResult::Success)
             }
         }
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutionResult {
+    Break,
+    Success,
+}
+
 #[derive(Debug, Clone)]
 pub struct InterpretError {
     token: Token,
-    message: String, // TODO: Use error kind pattern
+    kind: InterpretErrorKind,
 }
 
 impl Error for InterpretError {}
 
 impl fmt::Display for InterpretError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "[line {}] Runtime error: {}",
-            self.token.line, self.message
-        )
+        match self.kind {
+            InterpretErrorKind::InvalidOperandsForBinaryOpeator => write!(
+                f,
+                "[line {}] Runtime error: Invalid operands for binary operator '{}'.",
+                self.token.line, self.token.lexeme
+            ),
+            InterpretErrorKind::InvalidBinaryOperatorForStringOperands => write!(
+                f,
+                "[line {}] Runtime error: Cannot use operator '{}' for string operands.",
+                self.token.line, self.token.lexeme
+            ),
+            InterpretErrorKind::InvalidBinaryOperatorForBooleanOperands => write!(
+                f,
+                "[line {}] Runtime error: Cannot use operator '{}' for boolean operands.",
+                self.token.line, self.token.lexeme
+            ),
+            InterpretErrorKind::InvalidBinaryOperatorForNilOperands => write!(
+                f,
+                "[line {}] Runtime error: Cannot use operator '{}' for nil operands.",
+                self.token.line, self.token.lexeme
+            ),
+            InterpretErrorKind::InvalidBinaryExpression => write!(
+                f,
+                "[line {}] Runtime error: Invalid binary expression '{}'.",
+                self.token.line, self.token.lexeme
+            ),
+            InterpretErrorKind::InvalidUnaryExpression => write!(
+                f,
+                "[line {}] Runtime error: Invalid unary expression '{}'.",
+                self.token.line, self.token.lexeme
+            ),
+            InterpretErrorKind::UndefinedVariable => write!(
+                f,
+                "[line {}] Runtime error: Undefined variable '{}'.",
+                self.token.line, self.token.lexeme
+            ),
+            InterpretErrorKind::UninitializedVariable => write!(
+                f,
+                "[line {}] Runtime error: Variable '{}' must be initialized before use.",
+                self.token.line, self.token.lexeme
+            ),
+        }
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum InterpretErrorKind {
+    InvalidOperandsForBinaryOpeator,
+    InvalidBinaryOperatorForStringOperands,
+    InvalidBinaryOperatorForBooleanOperands,
+    InvalidBinaryOperatorForNilOperands,
+    InvalidBinaryExpression,
+    InvalidUnaryExpression,
+    UndefinedVariable,
+    UninitializedVariable,
 }
