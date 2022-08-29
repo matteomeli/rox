@@ -24,6 +24,11 @@ pub enum Expression {
     Literal {
         literal: Literal,
     },
+    Logical {
+        left: Box<Expression>,
+        operator: Token,
+        right: Box<Expression>,
+    },
     Unary {
         operator: Token,
         expr: Box<Expression>,
@@ -54,6 +59,14 @@ impl Expression {
         Expression::Literal { literal }
     }
 
+    pub fn logical(left: Box<Expression>, operator: Token, right: Box<Expression>) -> Self {
+        Expression::Logical {
+            left,
+            operator,
+            right,
+        }
+    }
+
     pub fn unary(operator: Token, expr: Box<Expression>) -> Self {
         Expression::Unary { operator, expr }
     }
@@ -79,10 +92,19 @@ pub enum Statement {
         statements: Vec<Statement>,
     },
     Expression(Expression),
+    If {
+        condition: Expression,
+        then_branch: Box<Statement>,
+        else_branch: Option<Box<Statement>>,
+    },
     Print(Expression),
     Var {
         name: Token,
         initializer: Option<Expression>,
+    },
+    While {
+        condition: Expression,
+        body: Box<Statement>,
     },
 }
 
@@ -95,12 +117,28 @@ impl Statement {
         Statement::Expression(expression)
     }
 
+    pub fn r#if(
+        condition: Expression,
+        then_branch: Box<Statement>,
+        else_branch: Option<Box<Statement>>,
+    ) -> Self {
+        Statement::If {
+            condition,
+            then_branch,
+            else_branch,
+        }
+    }
+
     pub fn print(expression: Expression) -> Self {
         Statement::Print(expression)
     }
 
     pub fn var(name: Token, initializer: Option<Expression>) -> Self {
         Statement::Var { name, initializer }
+    }
+
+    pub fn r#while(condition: Expression, body: Box<Statement>) -> Self {
+        Statement::While { condition, body }
     }
 
     pub fn accept<V: StatementVisitor>(&self, visitor: &mut V) -> V::Result {

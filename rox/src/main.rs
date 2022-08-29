@@ -65,7 +65,11 @@ impl Rox {
         };
 
         // Interpret AST
-        self.interpreter.interpret(&statements)?;
+        if is_repl {
+            self.interpreter.interpret_repl(&statements)?;
+        } else {
+            self.interpreter.interpret(&statements)?;
+        }
 
         Ok(())
     }

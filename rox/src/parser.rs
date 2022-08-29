@@ -34,13 +34,7 @@ impl Parser {
 
     pub fn parse_repl(&mut self) -> ParseResult<Vec<Statement>> {
         self.is_repl = true;
-
-        let mut statements = Vec::new();
-        while !self.is_at_end() {
-            statements.push(self.declaration()?);
-        }
-
-        Ok(statements)
+        self.parse()
     }
 
     fn declaration(&mut self) -> ParseResult<Statement> {
@@ -72,13 +66,101 @@ impl Parser {
     }
 
     fn statement(&mut self) -> ParseResult<Statement> {
-        if self.matches(&[TokenType::Print]) {
+        if self.matches(&[TokenType::For]) {
+            self.for_statement()
+        } else if self.matches(&[TokenType::If]) {
+            self.if_statement()
+        } else if self.matches(&[TokenType::Print]) {
             self.print_statement()
+        } else if self.matches(&[TokenType::While]) {
+            self.while_statement()
         } else if self.matches(&[TokenType::LeftBrace]) {
             self.block()
         } else {
             self.expr_statement()
         }
+    }
+
+    fn for_statement(&mut self) -> ParseResult<Statement> {
+        self.consume(
+            TokenType::LeftParen,
+            ParseErrorKind::ExpectedLeftParenAfterFor,
+        )?;
+
+        let initializer = if self.matches(&[TokenType::Semicolon]) {
+            None
+        } else if self.matches(&[TokenType::Var]) {
+            Some(self.var_declaration()?)
+        } else {
+            Some(self.expr_statement()?)
+        };
+
+        let while_statement = {
+            let condition = if !self.check(TokenType::Semicolon) {
+                self.expression()?
+            } else {
+                Expression::literal(Literal::True)
+            };
+            self.consume(
+                TokenType::Semicolon,
+                ParseErrorKind::ExpectedSemicolonAfterForCondition,
+            )?;
+
+            let body = {
+                let increment = if !self.check(TokenType::RightParen) {
+                    Some(self.expression()?)
+                } else {
+                    None
+                };
+                self.consume(
+                    TokenType::RightParen,
+                    ParseErrorKind::ExpectedRightParenAfterForClauses,
+                )?;
+
+                if let Some(inc) = increment {
+                    Statement::block(vec![self.statement()?, Statement::expression(inc)])
+                } else {
+                    self.statement()?
+                }
+            };
+
+            Statement::r#while(condition, Box::new(body))
+        };
+
+        // Desugar for syntax into while construct
+        let for_statement = if let Some(init) = initializer {
+            Statement::block(vec![init, while_statement])
+        } else {
+            while_statement
+        };
+
+        Ok(for_statement)
+    }
+
+    fn if_statement(&mut self) -> ParseResult<Statement> {
+        self.consume(
+            TokenType::LeftParen,
+            ParseErrorKind::ExpectedLeftParenAfterIf,
+        )?;
+        let condition = self.expression()?;
+        self.consume(
+            TokenType::RightParen,
+            ParseErrorKind::ExpectedRightParenAfterCond,
+        )?;
+
+        let then_branch = self.statement()?;
+        let else_branch = if self.matches(&[TokenType::Else]) {
+            let statement = self.statement()?;
+            Some(statement)
+        } else {
+            None
+        };
+
+        Ok(Statement::r#if(
+            condition,
+            Box::new(then_branch),
+            else_branch.map(Box::new),
+        ))
     }
 
     fn print_statement(&mut self) -> ParseResult<Statement> {
@@ -88,6 +170,22 @@ impl Parser {
             ParseErrorKind::ExpectedSemicolonAfterValue,
         )
         .map(|_| Statement::print(expression))
+    }
+
+    fn while_statement(&mut self) -> ParseResult<Statement> {
+        self.consume(
+            TokenType::LeftParen,
+            ParseErrorKind::ExpectedLeftParenAfterWhile,
+        )?;
+        let condition = self.expression()?;
+        self.consume(
+            TokenType::RightParen,
+            ParseErrorKind::ExpectedRightParenAfterCond,
+        )?;
+
+        let body = self.statement()?;
+
+        Ok(Statement::r#while(condition, Box::new(body)))
     }
 
     fn block(&mut self) -> ParseResult<Statement> {
@@ -121,7 +219,7 @@ impl Parser {
     }
 
     fn assignment(&mut self) -> ParseResult<Expression> {
-        let expression = self.equality()?;
+        let expression = self.or()?;
 
         if self.matches(&[TokenType::Equal]) {
             let equals = self.previous();
@@ -138,6 +236,30 @@ impl Parser {
         }
 
         Ok(expression)
+    }
+
+    fn or(&mut self) -> ParseResult<Expression> {
+        let mut left = self.and()?;
+
+        while self.matches(&[TokenType::Or]) {
+            let operator = self.previous();
+            let right = self.and()?;
+            left = Expression::logical(Box::new(left), operator, Box::new(right));
+        }
+
+        Ok(left)
+    }
+
+    fn and(&mut self) -> ParseResult<Expression> {
+        let mut left = self.equality()?;
+
+        while self.matches(&[TokenType::And]) {
+            let operator = self.previous();
+            let right = self.equality()?;
+            left = Expression::logical(Box::new(left), operator, Box::new(right));
+        }
+
+        Ok(left)
     }
 
     fn equality(&mut self) -> ParseResult<Expression> {
@@ -357,6 +479,12 @@ pub enum ParseErrorKind {
     ExpectedSemicolonAfterVarDeclaration,
     InvalidAssignmentTarget,
     ExpectedRightBraceAfterBlock,
+    ExpectedLeftParenAfterIf,
+    ExpectedRightParenAfterCond,
+    ExpectedLeftParenAfterWhile,
+    ExpectedLeftParenAfterFor,
+    ExpectedSemicolonAfterForCondition,
+    ExpectedRightParenAfterForClauses,
 }
 
 impl fmt::Display for ParseErrorKind {
@@ -374,6 +502,16 @@ impl fmt::Display for ParseErrorKind {
                 write!(f, "Invalid assignment target.")
             }
             Self::ExpectedRightBraceAfterBlock => write!(f, "Expected '}}' after block."),
+            Self::ExpectedLeftParenAfterIf => write!(f, "Expected '(' after 'if'."),
+            Self::ExpectedRightParenAfterCond => write!(f, "Expected ')' after condition."),
+            Self::ExpectedLeftParenAfterWhile => write!(f, "Expected '(' after 'while'."),
+            Self::ExpectedLeftParenAfterFor => write!(f, "Expected '(' after 'for'."),
+            Self::ExpectedSemicolonAfterForCondition => {
+                write!(f, "Expected ';' after loop condition.")
+            }
+            Self::ExpectedRightParenAfterForClauses => {
+                write!(f, "Expected ')' after 'for' clauses.")
+            }
         }
     }
 }

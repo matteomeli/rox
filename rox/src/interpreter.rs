@@ -13,6 +13,7 @@ use std::{
 #[derive(Default)]
 pub struct Interpreter {
     environment: Environment,
+    is_repl: bool,
 }
 
 pub type InterpretResult<T> = Result<T, InterpretError>;
@@ -24,6 +25,11 @@ impl Interpreter {
         }
 
         Ok(())
+    }
+
+    pub fn interpret_repl(&mut self, statements: &[Statement]) -> InterpretResult<()> {
+        self.is_repl = true;
+        self.interpret(statements)
     }
 
     fn execute(&mut self, statement: &Statement) -> InterpretResult<()> {
@@ -130,15 +136,24 @@ impl ExpressionVisitor for Interpreter {
 
                 Ok(result)
             }
+            Expression::Logical {
+                left,
+                operator,
+                right,
+            } => {
+                let left = self.evaluate(left)?;
+                match operator.token_type {
+                    TokenType::Or if left.is_truthy() => Ok(left),
+                    TokenType::And if !left.is_truthy() => Ok(left),
+                    _ => self.evaluate(right),
+                }
+            }
             Expression::Unary { operator, expr } => {
                 let right = self.evaluate(expr)?;
 
                 match (operator.token_type, right) {
                     (TokenType::Minus, Type::Number(n)) => Ok(Type::Number(-n)),
-                    (TokenType::Bang, Type::Nil) | (TokenType::Bang, Type::Boolean(false)) => {
-                        Ok(Type::Boolean(true))
-                    }
-                    (TokenType::Bang, _) => Ok(Type::Boolean(false)),
+                    (TokenType::Bang, value) => Ok(Type::Boolean(!value.is_truthy())),
                     _ => Err(InterpretError {
                         token: operator.clone(),
                         message: "Invalid unary expression.".to_string(),
@@ -178,14 +193,39 @@ impl StatementVisitor for Interpreter {
 
     fn visit_stmt(&mut self, statement: &Statement) -> Self::Result {
         match statement {
+            Statement::Block { statements } => {
+                self.environment.push();
+                for statement in statements {
+                    self.execute(statement)
+                        .inspect_err(|_| self.environment.pop())?;
+                }
+                self.environment.pop();
+
+                Ok(())
+            }
             Statement::Expression(expression) => {
                 let result = self.evaluate(expression)?;
-                match result {
-                    Type::Nil => println!("nil"),
-                    Type::Boolean(b) => println!("{}", b),
-                    Type::String(s) => println!("{}", s),
-                    Type::Number(n) => println!("{}", n),
+                if self.is_repl {
+                    match result {
+                        Type::Nil => println!("nil"),
+                        Type::Boolean(b) => println!("{}", b),
+                        Type::String(s) => println!("{}", s),
+                        Type::Number(n) => println!("{}", n),
+                    }
                 }
+                Ok(())
+            }
+            Statement::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                let cond = self.evaluate(condition)?;
+                if cond.is_truthy() {
+                    self.execute(then_branch)?;
+                } else if let Some(else_branch) = else_branch {
+                    self.execute(else_branch)?;
+                };
                 Ok(())
             }
             Statement::Print(expression) => {
@@ -208,13 +248,10 @@ impl StatementVisitor for Interpreter {
 
                 Ok(())
             }
-            Statement::Block { statements } => {
-                self.environment.push();
-                for statement in statements {
-                    self.execute(statement)
-                        .inspect_err(|_| self.environment.pop())?;
+            Statement::While { condition, body } => {
+                while self.evaluate(condition)?.is_truthy() {
+                    self.execute(body)?;
                 }
-                self.environment.pop();
 
                 Ok(())
             }
