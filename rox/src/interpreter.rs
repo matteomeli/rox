@@ -13,7 +13,6 @@ use std::{
 #[derive(Default)]
 pub struct Interpreter {
     environment: Environment,
-    is_repl: bool,
 }
 
 pub type InterpretResult<T> = Result<T, InterpretError>;
@@ -28,8 +27,23 @@ impl Interpreter {
     }
 
     pub fn interpret_repl(&mut self, statements: &[Statement]) -> InterpretResult<()> {
-        self.is_repl = true;
-        self.interpret(statements)
+        if let Some((last, others)) = statements.split_last() {
+            self.interpret(others)?;
+            match last {
+                Statement::Expression(expr) => {
+                    let result = self.evaluate(expr)?;
+                    match result {
+                        Type::Nil => println!("nil"),
+                        Type::Boolean(b) => println!("{}", b),
+                        Type::String(s) => println!("{}", s),
+                        Type::Number(n) => println!("{}", n),
+                    }
+                }
+                _ => self.execute(last)?,
+            }
+        }
+
+        Ok(())
     }
 
     fn execute(&mut self, statement: &Statement) -> InterpretResult<()> {
@@ -204,15 +218,7 @@ impl StatementVisitor for Interpreter {
                 Ok(())
             }
             Statement::Expression(expression) => {
-                let result = self.evaluate(expression)?;
-                if self.is_repl {
-                    match result {
-                        Type::Nil => println!("nil"),
-                        Type::Boolean(b) => println!("{}", b),
-                        Type::String(s) => println!("{}", s),
-                        Type::Number(n) => println!("{}", n),
-                    }
-                }
+                self.evaluate(expression)?;
                 Ok(())
             }
             Statement::If {
