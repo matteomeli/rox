@@ -7,7 +7,7 @@ pub trait ExpressionVisitor {
     fn visit_expr(&mut self, expression: &Expression) -> Self::Result;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expression {
     Assign {
         name: Token,
@@ -17,6 +17,11 @@ pub enum Expression {
         left: Box<Expression>,
         operator: Token,
         right: Box<Expression>,
+    },
+    Call {
+        callee: Box<Expression>,
+        paren: Token,
+        arguments: Vec<Expression>,
     },
     Grouping {
         expr: Box<Expression>,
@@ -48,6 +53,14 @@ impl Expression {
             left,
             operator,
             right,
+        }
+    }
+
+    pub fn call(callee: Box<Expression>, paren: Token, arguments: Vec<Expression>) -> Self {
+        Expression::Call {
+            callee,
+            paren,
+            arguments,
         }
     }
 
@@ -86,7 +99,7 @@ pub trait StatementVisitor {
     fn visit_stmt(&mut self, statement: &Statement) -> Self::Result;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Statement {
     Block {
         statements: Vec<Statement>,
@@ -94,12 +107,21 @@ pub enum Statement {
     Break,
     Continue,
     Expression(Expression),
+    Function {
+        name: Token,
+        params: Vec<Token>,
+        body: Vec<Statement>,
+    },
     If {
         condition: Expression,
         then_branch: Box<Statement>,
         else_branch: Option<Box<Statement>>,
     },
     Print(Expression),
+    Return {
+        keyword: Token,
+        value: Option<Expression>,
+    },
     Var {
         name: Token,
         initializer: Option<Expression>,
@@ -127,6 +149,10 @@ impl Statement {
         Statement::Expression(expression)
     }
 
+    pub fn function(name: Token, params: Vec<Token>, body: Vec<Statement>) -> Self {
+        Statement::Function { name, params, body }
+    }
+
     pub fn r#if(
         condition: Expression,
         then_branch: Box<Statement>,
@@ -141,6 +167,10 @@ impl Statement {
 
     pub fn print(expression: Expression) -> Self {
         Statement::Print(expression)
+    }
+
+    pub fn r#return(keyword: Token, value: Option<Expression>) -> Self {
+        Statement::Return { keyword, value }
     }
 
     pub fn var(name: Token, initializer: Option<Expression>) -> Self {

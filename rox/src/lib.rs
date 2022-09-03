@@ -1,6 +1,7 @@
 #![feature(result_option_inspect)]
 
 pub mod ast;
+pub mod callable;
 pub mod environment;
 pub mod interpreter;
 pub mod parser;

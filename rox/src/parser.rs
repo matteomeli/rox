@@ -40,7 +40,9 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> ParseResult<Statement> {
-        let result = if self.matches(&[TokenType::Var]) {
+        let result = if self.matches(&[TokenType::Fun]) {
+            self.function()
+        } else if self.matches(&[TokenType::Var]) {
             self.var_declaration()
         } else {
             self.statement()
@@ -50,6 +52,41 @@ impl Parser {
                 self.synchronize()
             }
         })
+    }
+
+    fn function(&mut self) -> ParseResult<Statement> {
+        let name = self.consume(TokenType::Identifier, ParseErrorKind::ExpectedFucntionName)?;
+        self.consume(TokenType::LeftParen, ParseErrorKind::ExpectedFucntionName)?;
+        let mut params = Vec::new();
+        if !self.check(TokenType::RightParen) {
+            loop {
+                if params.len() >= 255 {
+                    return Err(ParseError {
+                        token: self.peek(),
+                        kind: ParseErrorKind::TooManyFunctionArguments,
+                    });
+                }
+
+                params
+                    .push(self.consume(TokenType::Identifier, ParseErrorKind::ExpectedParamName)?);
+
+                if !self.matches(&[TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+        self.consume(
+            TokenType::RightParen,
+            ParseErrorKind::ExpectedRightParenAfterParams,
+        )?;
+
+        self.consume(
+            TokenType::LeftBrace,
+            ParseErrorKind::ExpectedLeftBraceBeforeFunctionBody,
+        )?;
+        let body = self.block()?;
+
+        Ok(Statement::function(name, params, body))
     }
 
     fn var_declaration(&mut self) -> ParseResult<Statement> {
@@ -81,13 +118,15 @@ impl Parser {
             self.if_statement()
         } else if self.matches(&[TokenType::Print]) {
             self.print_statement()
+        } else if self.matches(&[TokenType::Return]) {
+            self.return_statement()
         } else if self.matches(&[TokenType::While]) {
             self.loop_depth += 1;
             let while_statement = self.while_statement();
             self.loop_depth -= 1;
             while_statement
         } else if self.matches(&[TokenType::LeftBrace]) {
-            self.block()
+            Ok(Statement::block(self.block()?))
         } else {
             self.expr_statement()
         }
@@ -212,6 +251,21 @@ impl Parser {
         .map(|_| Statement::print(expression))
     }
 
+    fn return_statement(&mut self) -> ParseResult<Statement> {
+        let keyword = self.previous();
+        let value = if !self.check(TokenType::Semicolon) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+        self.consume(
+            TokenType::Semicolon,
+            ParseErrorKind::ExpectedSemicolonAfterReturnValue,
+        )?;
+
+        Ok(Statement::r#return(keyword, value))
+    }
+
     fn while_statement(&mut self) -> ParseResult<Statement> {
         self.consume(
             TokenType::LeftParen,
@@ -228,18 +282,17 @@ impl Parser {
         Ok(Statement::r#while(condition, Box::new(body)))
     }
 
-    fn block(&mut self) -> ParseResult<Statement> {
+    fn block(&mut self) -> ParseResult<Vec<Statement>> {
         let mut statements = Vec::new();
-
         while !self.check(TokenType::RightBrace) && !self.is_at_end() {
             statements.push(self.declaration()?);
         }
-
         self.consume(
             TokenType::RightBrace,
             ParseErrorKind::ExpectedRightBraceAfterBlock,
-        )
-        .map(|_| Statement::block(statements))
+        )?;
+
+        Ok(statements)
     }
 
     fn expr_statement(&mut self) -> ParseResult<Statement> {
@@ -362,7 +415,46 @@ impl Parser {
             return Ok(Expression::unary(operator, Box::new(right)));
         }
 
-        self.primary()
+        self.call()
+    }
+
+    fn call(&mut self) -> ParseResult<Expression> {
+        let mut expression = self.primary()?;
+
+        loop {
+            if self.matches(&[TokenType::LeftParen]) {
+                expression = self.finish_call(expression)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(expression)
+    }
+
+    fn finish_call(&mut self, callee: Expression) -> ParseResult<Expression> {
+        let mut arguments = Vec::new();
+        if !self.check(TokenType::RightParen) {
+            loop {
+                if arguments.len() >= 255 {
+                    return Err(ParseError {
+                        token: self.peek(),
+                        kind: ParseErrorKind::TooManyFunctionArguments,
+                    });
+                }
+                arguments.push(self.expression()?);
+                if !self.matches(&[TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+
+        let paren = self.consume(
+            TokenType::RightParen,
+            ParseErrorKind::ExpectedRightParenAfterFunctionArguments,
+        )?;
+
+        Ok(Expression::call(Box::new(callee), paren, arguments))
     }
 
     fn primary(&mut self) -> ParseResult<Expression> {
@@ -489,7 +581,10 @@ pub struct ParseError {
 
 impl ParseError {
     pub fn should_synchronize(&self) -> bool {
-        !matches!(self.kind, ParseErrorKind::InvalidAssignmentTarget)
+        !matches!(
+            self.kind,
+            ParseErrorKind::InvalidAssignmentTarget | ParseErrorKind::TooManyFunctionArguments
+        )
     }
 }
 
@@ -529,6 +624,14 @@ pub enum ParseErrorKind {
     ExpectedEnclosingLoopToBreak,
     ExpectedSemicolonAfterContinue,
     ExpectedEnclosingLoopToContinue,
+    ExpectedRightParenAfterFunctionArguments,
+    TooManyFunctionArguments,
+    ExpectedFucntionName,
+    TooManyFunctionParams,
+    ExpectedParamName,
+    ExpectedRightParenAfterParams,
+    ExpectedLeftBraceBeforeFunctionBody,
+    ExpectedSemicolonAfterReturnValue,
 }
 
 impl fmt::Display for ParseErrorKind {
@@ -567,6 +670,30 @@ impl fmt::Display for ParseErrorKind {
             }
             Self::ExpectedEnclosingLoopToContinue => {
                 write!(f, "Must be inside loop to use 'continue'.")
+            }
+            Self::ExpectedRightParenAfterFunctionArguments => {
+                write!(f, "Expected ')' after function arguments.")
+            }
+            Self::TooManyFunctionArguments => {
+                write!(f, "Cannot have more than 255 function arguments.")
+            }
+            Self::ExpectedFucntionName => {
+                write!(f, "Expected function name.")
+            }
+            Self::TooManyFunctionParams => {
+                write!(f, "Cannot have more than 255 function parameters.")
+            }
+            Self::ExpectedParamName => {
+                write!(f, "Expected parameter name.")
+            }
+            Self::ExpectedRightParenAfterParams => {
+                write!(f, "Expected ')' after parameters.")
+            }
+            Self::ExpectedLeftBraceBeforeFunctionBody => {
+                write!(f, "Expected '{{' before function body.")
+            }
+            Self::ExpectedSemicolonAfterReturnValue => {
+                write!(f, "Expected ';' after 'return'  alue.")
             }
         }
     }

@@ -2,26 +2,21 @@ use crate::{token::Token, types::Type};
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
+#[derive(Debug, Clone)]
 pub struct Environment {
     cactus: Cactus<RefCell<EnvironmentNode>>,
 }
 
 impl Environment {
     pub fn global() -> Self {
-        let mut env = Environment {
-            cactus: Cactus::default(),
-        };
-        env.push();
-        env
+        Environment {
+            cactus: Cactus::default().child(RefCell::new(EnvironmentNode::default())),
+        }
     }
 
-    pub fn push(&mut self) {
-        self.cactus = self.cactus.child(RefCell::new(EnvironmentNode::default()));
-    }
-
-    pub fn pop(&mut self) {
-        if let Some(parent) = self.cactus.parent() {
-            self.cactus = parent;
+    pub fn child(&self) -> Self {
+        Environment {
+            cactus: self.cactus.child(RefCell::new(EnvironmentNode::default())),
         }
     }
 
@@ -56,7 +51,7 @@ impl Default for Environment {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default, Clone)]
 pub struct EnvironmentNode {
     values: HashMap<String, Option<Type>>,
 }
@@ -81,11 +76,12 @@ impl EnvironmentNode {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Cactus<T> {
     node: Option<Rc<Node<T>>>,
 }
 
+#[derive(Debug)]
 struct Node<T> {
     val: T,
     parent: Option<Rc<Node<T>>>,

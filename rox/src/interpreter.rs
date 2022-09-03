@@ -1,5 +1,6 @@
 use crate::{
     ast::{Expression, ExpressionVisitor, Statement, StatementVisitor},
+    callable::{Clock, Function},
     environment::Environment,
     token::{Token, TokenType},
     types::{Literal, Type},
@@ -10,9 +11,16 @@ use std::{
     fmt::{self, Write},
 };
 
-#[derive(Default)]
 pub struct Interpreter {
     environment: Environment,
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        let mut environment = Environment::default();
+        environment.define("clock".to_string(), Some(Type::Callable(Box::new(Clock))));
+        Interpreter { environment }
+    }
 }
 
 pub type InterpretResult<T> = Result<T, InterpretError>;
@@ -31,13 +39,7 @@ impl Interpreter {
             self.interpret(others)?;
             match last {
                 Statement::Expression(expr) => {
-                    let result = self.evaluate(expr)?;
-                    match result {
-                        Type::Nil => println!("nil"),
-                        Type::Boolean(b) => println!("{}", b),
-                        Type::String(s) => println!("{}", s),
-                        Type::Number(n) => println!("{}", n),
-                    }
+                    println!("{}", self.evaluate(expr)?);
                 }
                 _ => {
                     self.execute(last)?;
@@ -46,6 +48,29 @@ impl Interpreter {
         }
 
         Ok(())
+    }
+
+    pub fn execute_block(
+        &mut self,
+        statements: &[Statement],
+        mut environment: Environment,
+    ) -> InterpretResult<ExecutionResult> {
+        std::mem::swap(&mut self.environment, &mut environment);
+        for statement in statements {
+            match self.execute(statement) {
+                result @ Err(_)
+                | result @ Ok(ExecutionResult::Break)
+                | result @ Ok(ExecutionResult::Continue)
+                | result @ Ok(ExecutionResult::Return(_)) => {
+                    std::mem::swap(&mut self.environment, &mut environment);
+                    return result;
+                }
+                _ => (),
+            }
+        }
+        std::mem::swap(&mut self.environment, &mut environment);
+
+        Ok(ExecutionResult::Success)
     }
 
     fn execute(&mut self, statement: &Statement) -> InterpretResult<ExecutionResult> {
@@ -82,10 +107,10 @@ impl ExpressionVisitor for Interpreter {
                         TokenType::LessEqual => Ok(Type::Boolean(ln <= rn)),
                         TokenType::EqualEqual => Ok(Type::Boolean(ln == rn)),
                         TokenType::NotEqual => Ok(Type::Boolean(ln != rn)),
-                        _ => Err(InterpretError {
-                            token: operator.clone(),
-                            kind: InterpretErrorKind::InvalidOperandsForBinaryOpeator,
-                        }),
+                        _ => Err(InterpretError::new(
+                            operator.clone(),
+                            InterpretErrorKind::InvalidOperandsForBinaryOpeator,
+                        )),
                     },
                     (Type::String(mut ls), op, Type::String(rs)) => match op {
                         TokenType::EqualEqual => Ok(Type::Boolean(ls == rs)),
@@ -94,10 +119,10 @@ impl ExpressionVisitor for Interpreter {
                             ls.push_str(&rs);
                             Ok(Type::String(ls))
                         }
-                        _ => Err(InterpretError {
-                            token: operator.clone(),
-                            kind: InterpretErrorKind::InvalidBinaryOperatorForStringOperands,
-                        }),
+                        _ => Err(InterpretError::new(
+                            operator.clone(),
+                            InterpretErrorKind::InvalidBinaryOperatorForStringOperands,
+                        )),
                     },
                     (Type::String(mut s), TokenType::Plus, Type::Number(n))
                     | (Type::Number(n), TokenType::Plus, Type::String(mut s)) => {
@@ -107,25 +132,58 @@ impl ExpressionVisitor for Interpreter {
                     (Type::Boolean(lb), op, Type::Boolean(rb)) => match op {
                         TokenType::EqualEqual => Ok(Type::Boolean(lb == rb)),
                         TokenType::NotEqual => Ok(Type::Boolean(lb != rb)),
-                        _ => Err(InterpretError {
-                            token: operator.clone(),
-                            kind: InterpretErrorKind::InvalidBinaryOperatorForBooleanOperands,
-                        }),
+                        _ => Err(InterpretError::new(
+                            operator.clone(),
+                            InterpretErrorKind::InvalidBinaryOperatorForBooleanOperands,
+                        )),
                     },
                     (Type::Nil, op, Type::Nil) => match op {
                         TokenType::EqualEqual => Ok(Type::Boolean(true)),
                         TokenType::NotEqual => Ok(Type::Boolean(false)),
-                        _ => Err(InterpretError {
-                            token: operator.clone(),
-                            kind: InterpretErrorKind::InvalidBinaryOperatorForNilOperands,
-                        }),
+                        _ => Err(InterpretError::new(
+                            operator.clone(),
+                            InterpretErrorKind::InvalidBinaryOperatorForNilOperands,
+                        )),
                     },
                     (Type::Nil, TokenType::EqualEqual, _) => Ok(Type::Boolean(false)),
                     (Type::Nil, TokenType::NotEqual, _) => Ok(Type::Boolean(true)),
-                    _ => Err(InterpretError {
-                        token: operator.clone(),
-                        kind: InterpretErrorKind::InvalidBinaryExpression,
-                    }),
+                    _ => Err(InterpretError::new(
+                        operator.clone(),
+                        InterpretErrorKind::InvalidBinaryExpression,
+                    )),
+                }
+            }
+            Expression::Call {
+                callee,
+                paren,
+                arguments,
+            } => {
+                let callee = self.evaluate(callee)?;
+
+                let mut args = Vec::new();
+                for argument in arguments {
+                    args.push(self.evaluate(argument)?);
+                }
+
+                if let Type::Callable(callable) = callee {
+                    if args.len() != callable.arity() {
+                        Err(InterpretError::with_message(
+                            paren.clone(),
+                            InterpretErrorKind::InvalidCallableArguments,
+                            Some(format!(
+                                "Expected {} arguments, but got {}.",
+                                callable.arity(),
+                                args.len()
+                            )),
+                        ))
+                    } else {
+                        callable.call(self, args)
+                    }
+                } else {
+                    Err(InterpretError::new(
+                        paren.clone(),
+                        InterpretErrorKind::InvalidCallable,
+                    ))
                 }
             }
             Expression::Grouping { expr } => self.evaluate(expr),
@@ -158,30 +216,30 @@ impl ExpressionVisitor for Interpreter {
                 match (operator.token_type, right) {
                     (TokenType::Minus, Type::Number(n)) => Ok(Type::Number(-n)),
                     (TokenType::Bang, value) => Ok(Type::Boolean(!value.is_truthy())),
-                    _ => Err(InterpretError {
-                        token: operator.clone(),
-                        kind: InterpretErrorKind::InvalidUnaryExpression,
-                    }),
+                    _ => Err(InterpretError::new(
+                        operator.clone(),
+                        InterpretErrorKind::InvalidUnaryExpression,
+                    )),
                 }
             }
             Expression::Variable { name } => match self.environment.get(name) {
                 Some(Some(value)) => Ok(value),
-                Some(None) => Err(InterpretError {
-                    token: name.clone(),
-                    kind: InterpretErrorKind::UninitializedVariable,
-                }),
-                None => Err(InterpretError {
-                    token: name.clone(),
-                    kind: InterpretErrorKind::UninitializedVariable,
-                }),
+                Some(None) => Err(InterpretError::new(
+                    name.clone(),
+                    InterpretErrorKind::UninitializedVariable,
+                )),
+                None => Err(InterpretError::new(
+                    name.clone(),
+                    InterpretErrorKind::UninitializedVariable,
+                )),
             },
             Expression::Assign { name, value } => {
                 let value = self.evaluate(value)?;
                 if !self.environment.assign(name, value.clone()) {
-                    return Err(InterpretError {
-                        token: name.clone(),
-                        kind: InterpretErrorKind::UninitializedVariable,
-                    });
+                    return Err(InterpretError::new(
+                        name.clone(),
+                        InterpretErrorKind::UninitializedVariable,
+                    ));
                 }
                 Ok(value)
             }
@@ -195,26 +253,26 @@ impl StatementVisitor for Interpreter {
     fn visit_stmt(&mut self, statement: &Statement) -> Self::Result {
         match statement {
             Statement::Block { statements } => {
-                self.environment.push();
-                for statement in statements {
-                    match self.execute(statement) {
-                        result @ Err(_)
-                        | result @ Ok(ExecutionResult::Break)
-                        | result @ Ok(ExecutionResult::Continue) => {
-                            self.environment.pop();
-                            return result;
-                        }
-                        _ => (),
-                    }
-                }
-                self.environment.pop();
-
-                Ok(ExecutionResult::Success)
+                let environment = self.environment.child();
+                self.execute_block(statements, environment)
             }
             Statement::Break => Ok(ExecutionResult::Break),
             Statement::Continue => Ok(ExecutionResult::Continue),
             Statement::Expression(expression) => {
                 self.evaluate(expression)?;
+                Ok(ExecutionResult::Success)
+            }
+            Statement::Function { name, params, body } => {
+                let function = Function::new(
+                    name.clone(),
+                    params.clone(),
+                    body.clone(),
+                    self.environment.clone(),
+                );
+                self.environment.define(
+                    name.lexeme.clone(),
+                    Some(Type::Callable(Box::new(function))),
+                );
                 Ok(ExecutionResult::Success)
             }
             Statement::If {
@@ -232,15 +290,16 @@ impl StatementVisitor for Interpreter {
                 }
             }
             Statement::Print(expression) => {
-                let result = self.evaluate(expression)?;
-                match result {
-                    Type::Nil => println!("nil"),
-                    Type::Boolean(b) => println!("{}", b),
-                    Type::String(s) => println!("{}", s),
-                    Type::Number(n) => println!("{}", n),
-                }
-
+                println!("{}", self.evaluate(expression)?);
                 Ok(ExecutionResult::Success)
+            }
+            Statement::Return { value, .. } => {
+                if let Some(expression) = value {
+                    let result = self.evaluate(expression)?;
+                    Ok(ExecutionResult::Return(result))
+                } else {
+                    Ok(ExecutionResult::Return(Type::Nil))
+                }
             }
             Statement::Var { name, initializer } => {
                 let value = match initializer {
@@ -253,7 +312,7 @@ impl StatementVisitor for Interpreter {
             }
             Statement::While { condition, body } => {
                 while self.evaluate(condition)?.is_truthy() {
-                    if let Statement::Block { ref statements } = body.as_ref() {
+                    let result = if let Statement::Block { ref statements } = body.as_ref() {
                         match &statements[..] {
                             // For loops are desugared by the [Parser] as while loops containing an "artificial" enclosing block
                             // which in turn contains two statements: the original for-loop's block plus the increment statement, if any.
@@ -263,25 +322,22 @@ impl StatementVisitor for Interpreter {
                             [block @ Statement::Block { .. }, increment @ Statement::Expression(_)] =>
                             {
                                 let result = self.execute(block)?;
-                                // When executing `block`, any statemement can produce a `continue` or a `break`,
+                                // When executing `block`, any statemement can produce a `continue`, a `break` or `return`,
                                 // skipping any statement that would follow in the block.
-                                // We want to make sure the increment statement is always executed,
-                                // so `continue` can safely jump to the next iteration.
+                                // We want to make sure the increment statement is always executed even in those cases.
                                 self.execute(increment)?;
-                                // In case of `break` was produced we instead exit the whole while loop.
-                                if result == ExecutionResult::Break {
-                                    break;
-                                }
+                                result
                             }
-                            _ => {
-                                let res = self.execute(body)?;
-                                if res == ExecutionResult::Break {
-                                    break;
-                                }
-                            }
+                            _ => self.execute(body)?,
                         }
                     } else {
-                        self.execute(body)?;
+                        self.execute(body)?
+                    };
+
+                    match result {
+                        ExecutionResult::Break => break,
+                        ExecutionResult::Return(_) => return Ok(result),
+                        _ => (),
                     }
                 }
 
@@ -291,10 +347,11 @@ impl StatementVisitor for Interpreter {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum ExecutionResult {
     Break,
     Continue,
+    Return(Type),
     Success,
 }
 
@@ -302,6 +359,25 @@ pub enum ExecutionResult {
 pub struct InterpretError {
     token: Token,
     kind: InterpretErrorKind,
+    message: Option<String>,
+}
+
+impl InterpretError {
+    pub fn new(token: Token, kind: InterpretErrorKind) -> Self {
+        InterpretError {
+            token,
+            kind,
+            message: None,
+        }
+    }
+
+    pub fn with_message(token: Token, kind: InterpretErrorKind, message: Option<String>) -> Self {
+        InterpretError {
+            token,
+            kind,
+            message,
+        }
+    }
 }
 
 impl Error for InterpretError {}
@@ -349,6 +425,19 @@ impl fmt::Display for InterpretError {
                 "[line {}] Runtime error: Variable '{}' must be initialized before use.",
                 self.token.line, self.token.lexeme
             ),
+            InterpretErrorKind::InvalidCallable => write!(
+                f,
+                "[line {}] Runtime error: Can only call functions and classes.",
+                self.token.line,
+            ),
+            InterpretErrorKind::InvalidCallableArguments => write!(
+                f,
+                "[line {}] Runtime error: {}.",
+                self.token.line,
+                self.message
+                    .as_deref()
+                    .unwrap_or("Invalid number of arguments to callable")
+            ),
         }
     }
 }
@@ -363,4 +452,6 @@ pub enum InterpretErrorKind {
     InvalidUnaryExpression,
     UndefinedVariable,
     UninitializedVariable,
+    InvalidCallable,
+    InvalidCallableArguments,
 }

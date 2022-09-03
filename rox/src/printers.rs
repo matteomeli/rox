@@ -41,6 +41,7 @@ impl ExpressionVisitor for AstPrinter {
             Expression::Variable { name } => format!("var {}", &name.lexeme),
             Expression::Assign { .. } => todo!(),
             Expression::Logical { .. } => todo!(),
+            Expression::Call { .. } => todo!(),
         }
     }
 }
@@ -87,6 +88,7 @@ impl ExpressionVisitor for RPNPrinter {
             Expression::Variable { name } => format!("var {}", &name.lexeme),
             Expression::Assign { .. } => todo!(),
             Expression::Logical { .. } => todo!(),
+            Expression::Call { .. } => todo!(),
         }
     }
 }
