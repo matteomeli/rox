@@ -107,11 +107,7 @@ pub enum Statement {
     Break,
     Continue,
     Expression(Expression),
-    Function {
-        name: Token,
-        params: Vec<Token>,
-        body: Vec<Statement>,
-    },
+    Function(FunctionDeclaration),
     If {
         condition: Expression,
         then_branch: Box<Statement>,
@@ -150,7 +146,7 @@ impl Statement {
     }
 
     pub fn function(name: Token, params: Vec<Token>, body: Vec<Statement>) -> Self {
-        Statement::Function { name, params, body }
+        Statement::Function(FunctionDeclaration { name, params, body })
     }
 
     pub fn r#if(
@@ -184,4 +180,11 @@ impl Statement {
     pub fn accept<V: StatementVisitor>(&self, visitor: &mut V) -> V::Result {
         visitor.visit_stmt(self)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionDeclaration {
+    pub name: Token,
+    pub params: Vec<Token>,
+    pub body: Vec<Statement>,
 }

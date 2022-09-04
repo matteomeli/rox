@@ -262,15 +262,10 @@ impl StatementVisitor for Interpreter {
                 self.evaluate(expression)?;
                 Ok(ExecutionResult::Success)
             }
-            Statement::Function { name, params, body } => {
-                let function = Function::new(
-                    name.clone(),
-                    params.clone(),
-                    body.clone(),
-                    self.environment.clone(),
-                );
+            Statement::Function(declaration) => {
+                let function = Function::new(declaration.clone(), self.environment.clone());
                 self.environment.define(
-                    name.lexeme.clone(),
+                    declaration.name.lexeme.clone(),
                     Some(Type::Callable(Box::new(function))),
                 );
                 Ok(ExecutionResult::Success)

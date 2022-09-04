@@ -4,10 +4,9 @@ use std::{
 };
 
 use crate::{
-    ast::Statement,
+    ast::FunctionDeclaration,
     environment::Environment,
     interpreter::{ExecutionResult, InterpretResult, Interpreter},
-    token::Token,
     types::Type,
 };
 
@@ -61,23 +60,14 @@ impl Display for Clock {
 
 #[derive(Debug, Clone)]
 pub struct Function {
-    name: Token,
-    params: Vec<Token>,
-    body: Vec<Statement>,
+    declaration: FunctionDeclaration,
     closure: Environment,
 }
 
 impl Function {
-    pub fn new(
-        name: Token,
-        params: Vec<Token>,
-        body: Vec<Statement>,
-        closure: Environment,
-    ) -> Self {
+    pub fn new(declaration: FunctionDeclaration, closure: Environment) -> Self {
         Function {
-            name,
-            params,
-            body,
+            declaration,
             closure,
         }
     }
@@ -85,17 +75,17 @@ impl Function {
 
 impl Callable for Function {
     fn arity(&self) -> usize {
-        self.params.len()
+        self.declaration.params.len()
     }
 
     fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Type>) -> InterpretResult<Type> {
         let mut environment = self.closure.child();
-        for (token, arg) in self.params.iter().zip(arguments.iter()) {
+        for (token, arg) in self.declaration.params.iter().zip(arguments.iter()) {
             environment.define(token.lexeme.clone(), Some(arg.clone()));
         }
 
         if let ExecutionResult::Return(value) =
-            interpreter.execute_block(&self.body, environment)?
+            interpreter.execute_block(&self.declaration.body, environment)?
         {
             return Ok(value);
         }
@@ -106,6 +96,6 @@ impl Callable for Function {
 
 impl Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<fn {}>", self.name.lexeme)
+        write!(f, "<fn {}>", self.declaration.name.lexeme)
     }
 }
