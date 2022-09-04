@@ -35,6 +35,13 @@ impl Environment {
         None
     }
 
+    pub fn get_at(&self, distance: usize, name: &Token) -> Option<Option<Type>> {
+        self.cactus
+            .values()
+            .nth(distance)
+            .and_then(|env| env.borrow().get(name))
+    }
+
     pub fn assign(&mut self, name: &Token, new_value: Type) -> bool {
         for env in self.cactus.values() {
             if env.borrow_mut().assign(name, &new_value) {
@@ -42,6 +49,14 @@ impl Environment {
             }
         }
         false
+    }
+
+    pub fn assign_at(&mut self, distance: usize, name: &Token, new_value: Type) -> bool {
+        self.cactus
+            .values()
+            .nth(distance)
+            .map(|env| env.borrow_mut().assign(name, &new_value))
+            .unwrap_or(false)
     }
 }
 

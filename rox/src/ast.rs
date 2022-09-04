@@ -8,7 +8,23 @@ pub trait ExpressionVisitor {
 }
 
 #[derive(Debug, Clone)]
-pub enum Expression {
+pub struct Expression {
+    pub id: usize,
+    pub kind: ExpressionKind,
+}
+
+impl Expression {
+    pub fn new(id: usize, kind: ExpressionKind) -> Self {
+        Expression { id, kind }
+    }
+
+    pub fn accept<V: ExpressionVisitor>(&self, visitor: &mut V) -> V::Result {
+        visitor.visit_expr(self)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ExpressionKind {
     Assign {
         name: Token,
         value: Box<Expression>,
@@ -43,13 +59,13 @@ pub enum Expression {
     },
 }
 
-impl Expression {
+impl ExpressionKind {
     pub fn assign(name: Token, value: Box<Expression>) -> Self {
-        Expression::Assign { name, value }
+        ExpressionKind::Assign { name, value }
     }
 
     pub fn binary(left: Box<Expression>, operator: Token, right: Box<Expression>) -> Self {
-        Expression::Binary {
+        ExpressionKind::Binary {
             left,
             operator,
             right,
@@ -57,7 +73,7 @@ impl Expression {
     }
 
     pub fn call(callee: Box<Expression>, paren: Token, arguments: Vec<Expression>) -> Self {
-        Expression::Call {
+        ExpressionKind::Call {
             callee,
             paren,
             arguments,
@@ -65,15 +81,15 @@ impl Expression {
     }
 
     pub fn grouping(expr: Box<Expression>) -> Self {
-        Expression::Grouping { expr }
+        ExpressionKind::Grouping { expr }
     }
 
     pub fn literal(literal: Literal) -> Self {
-        Expression::Literal { literal }
+        ExpressionKind::Literal { literal }
     }
 
     pub fn logical(left: Box<Expression>, operator: Token, right: Box<Expression>) -> Self {
-        Expression::Logical {
+        ExpressionKind::Logical {
             left,
             operator,
             right,
@@ -81,15 +97,11 @@ impl Expression {
     }
 
     pub fn unary(operator: Token, expr: Box<Expression>) -> Self {
-        Expression::Unary { operator, expr }
+        ExpressionKind::Unary { operator, expr }
     }
 
     pub fn variable(name: Token) -> Self {
-        Expression::Variable { name }
-    }
-
-    pub fn accept<V: ExpressionVisitor>(&self, visitor: &mut V) -> V::Result {
-        visitor.visit_expr(self)
+        ExpressionKind::Variable { name }
     }
 }
 

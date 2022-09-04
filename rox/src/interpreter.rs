@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Expression, ExpressionVisitor, Statement, StatementVisitor},
+    ast::{Expression, ExpressionKind, ExpressionVisitor, Statement, StatementVisitor},
     callable::{Clock, Function},
     environment::Environment,
     token::{Token, TokenType},
@@ -7,19 +7,27 @@ use crate::{
 };
 
 use std::{
+    collections::HashMap,
     error::Error,
     fmt::{self, Write},
 };
 
 pub struct Interpreter {
+    globals: Environment,
     environment: Environment,
+    locals: HashMap<usize, usize>,
 }
 
 impl Default for Interpreter {
     fn default() -> Self {
-        let mut environment = Environment::default();
-        environment.define("clock".to_string(), Some(Type::Callable(Box::new(Clock))));
-        Interpreter { environment }
+        let mut globals = Environment::default();
+        globals.define("clock".to_string(), Some(Type::Callable(Box::new(Clock))));
+        let environment = globals.clone();
+        Interpreter {
+            globals,
+            environment,
+            locals: HashMap::new(),
+        }
     }
 }
 
@@ -73,6 +81,18 @@ impl Interpreter {
         Ok(ExecutionResult::Success)
     }
 
+    pub fn resolve(&mut self, expression_id: usize, scope_distance: usize) {
+        self.locals.insert(expression_id, scope_distance);
+    }
+
+    fn lookup_variable(&self, name: &Token, expression_id: usize) -> Option<Option<Type>> {
+        if let Some(distance) = self.locals.get(&expression_id) {
+            self.environment.get_at(*distance, name)
+        } else {
+            self.globals.get(name)
+        }
+    }
+
     fn execute(&mut self, statement: &Statement) -> InterpretResult<ExecutionResult> {
         statement.accept(self)
     }
@@ -87,10 +107,34 @@ impl ExpressionVisitor for Interpreter {
 
     fn visit_expr(&mut self, expression: &Expression) -> Self::Result {
         match expression {
-            Expression::Binary {
-                left,
-                operator,
-                right,
+            Expression {
+                id,
+                kind: ExpressionKind::Assign { name, value },
+            } => {
+                let value = self.evaluate(value)?;
+
+                let success = if let Some(distance) = self.locals.get(id) {
+                    self.environment.assign_at(*distance, name, value.clone())
+                } else {
+                    self.globals.assign(name, value.clone())
+                };
+                if !success {
+                    return Err(InterpretError::new(
+                        name.clone(),
+                        InterpretErrorKind::UninitializedVariable,
+                    ));
+                }
+
+                Ok(value)
+            }
+            Expression {
+                kind:
+                    ExpressionKind::Binary {
+                        left,
+                        operator,
+                        right,
+                    },
+                ..
             } => {
                 let left = self.evaluate(left)?;
                 let right = self.evaluate(right)?;
@@ -153,10 +197,14 @@ impl ExpressionVisitor for Interpreter {
                     )),
                 }
             }
-            Expression::Call {
-                callee,
-                paren,
-                arguments,
+            Expression {
+                kind:
+                    ExpressionKind::Call {
+                        callee,
+                        paren,
+                        arguments,
+                    },
+                ..
             } => {
                 let callee = self.evaluate(callee)?;
 
@@ -186,8 +234,14 @@ impl ExpressionVisitor for Interpreter {
                     ))
                 }
             }
-            Expression::Grouping { expr } => self.evaluate(expr),
-            Expression::Literal { literal } => {
+            Expression {
+                kind: ExpressionKind::Grouping { expr },
+                ..
+            } => self.evaluate(expr),
+            Expression {
+                kind: ExpressionKind::Literal { literal },
+                ..
+            } => {
                 let result = match literal {
                     Literal::False => Type::Boolean(false),
                     Literal::True => Type::Boolean(true),
@@ -198,10 +252,14 @@ impl ExpressionVisitor for Interpreter {
 
                 Ok(result)
             }
-            Expression::Logical {
-                left,
-                operator,
-                right,
+            Expression {
+                kind:
+                    ExpressionKind::Logical {
+                        left,
+                        operator,
+                        right,
+                    },
+                ..
             } => {
                 let left = self.evaluate(left)?;
                 match operator.token_type {
@@ -210,7 +268,10 @@ impl ExpressionVisitor for Interpreter {
                     _ => self.evaluate(right),
                 }
             }
-            Expression::Unary { operator, expr } => {
+            Expression {
+                kind: ExpressionKind::Unary { operator, expr },
+                ..
+            } => {
                 let right = self.evaluate(expr)?;
 
                 match (operator.token_type, right) {
@@ -222,7 +283,10 @@ impl ExpressionVisitor for Interpreter {
                     )),
                 }
             }
-            Expression::Variable { name } => match self.environment.get(name) {
+            Expression {
+                id,
+                kind: ExpressionKind::Variable { name },
+            } => match self.lookup_variable(name, *id) {
                 Some(Some(value)) => Ok(value),
                 Some(None) => Err(InterpretError::new(
                     name.clone(),
@@ -233,16 +297,6 @@ impl ExpressionVisitor for Interpreter {
                     InterpretErrorKind::UninitializedVariable,
                 )),
             },
-            Expression::Assign { name, value } => {
-                let value = self.evaluate(value)?;
-                if !self.environment.assign(name, value.clone()) {
-                    return Err(InterpretError::new(
-                        name.clone(),
-                        InterpretErrorKind::UninitializedVariable,
-                    ));
-                }
-                Ok(value)
-            }
         }
     }
 }
@@ -314,9 +368,10 @@ impl StatementVisitor for Interpreter {
                             // This structure is important to consider when implementing `continue` as the increment statememnt has to always run,
                             // even when one of the statements in the for-loop's (desugared as while) block requests to continue to
                             // the next iteration and skip the remainder statements of this one. Below is where this special case is handled.
-                            [block @ Statement::Block { .. }, increment @ Statement::Expression(_)] =>
+                            [Statement::Block { statements }, increment @ Statement::Expression(_)] =>
                             {
-                                let result = self.execute(block)?;
+                                let result =
+                                    self.execute_block(statements, self.environment.clone())?;
                                 // When executing `block`, any statemement can produce a `continue`, a `break` or `return`,
                                 // skipping any statement that would follow in the block.
                                 // We want to make sure the increment statement is always executed even in those cases.

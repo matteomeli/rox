@@ -1,7 +1,7 @@
 use std::{error::Error, fmt};
 
 use crate::{
-    ast::{Expression, Statement},
+    ast::{Expression, ExpressionKind, Statement},
     token::{Token, TokenType},
     types::Literal,
 };
@@ -13,6 +13,7 @@ pub struct Parser {
     current: usize,
     is_repl: bool,
     loop_depth: u32,
+    expression_id: usize,
 }
 
 impl Parser {
@@ -22,6 +23,7 @@ impl Parser {
             current: 0,
             is_repl: false,
             loop_depth: 0,
+            expression_id: 0,
         }
     }
 
@@ -180,7 +182,10 @@ impl Parser {
             let condition = if !self.check(TokenType::Semicolon) {
                 self.expression()?
             } else {
-                Expression::literal(Literal::True)
+                Expression::new(
+                    self.new_expression_id(),
+                    ExpressionKind::literal(Literal::True),
+                )
             };
             self.consume(
                 TokenType::Semicolon,
@@ -318,8 +323,11 @@ impl Parser {
             let equals = self.previous();
             let value = self.assignment()?;
 
-            if let Expression::Variable { name } = expression {
-                return Ok(Expression::assign(name, Box::new(value)));
+            if let ExpressionKind::Variable { name } = expression.kind {
+                return Ok(Expression::new(
+                    self.new_expression_id(),
+                    ExpressionKind::assign(name, Box::new(value)),
+                ));
             }
 
             return Err(ParseError {
@@ -337,7 +345,10 @@ impl Parser {
         while self.matches(&[TokenType::Or]) {
             let operator = self.previous();
             let right = self.and()?;
-            left = Expression::logical(Box::new(left), operator, Box::new(right));
+            left = Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::logical(Box::new(left), operator, Box::new(right)),
+            );
         }
 
         Ok(left)
@@ -349,7 +360,10 @@ impl Parser {
         while self.matches(&[TokenType::And]) {
             let operator = self.previous();
             let right = self.equality()?;
-            left = Expression::logical(Box::new(left), operator, Box::new(right));
+            left = Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::logical(Box::new(left), operator, Box::new(right)),
+            );
         }
 
         Ok(left)
@@ -361,7 +375,10 @@ impl Parser {
         while self.matches(&[TokenType::NotEqual, TokenType::EqualEqual]) {
             let operator = self.previous();
             let right = self.comparison()?;
-            left = Expression::binary(Box::new(left), operator, Box::new(right));
+            left = Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::binary(Box::new(left), operator, Box::new(right)),
+            );
         }
 
         Ok(left)
@@ -378,7 +395,10 @@ impl Parser {
         ]) {
             let operator = self.previous();
             let right = self.term()?;
-            left = Expression::binary(Box::new(left), operator, Box::new(right));
+            left = Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::binary(Box::new(left), operator, Box::new(right)),
+            );
         }
 
         Ok(left)
@@ -390,7 +410,10 @@ impl Parser {
         while self.matches(&[TokenType::Minus, TokenType::Plus]) {
             let operator = self.previous();
             let right = self.factor()?;
-            left = Expression::binary(Box::new(left), operator, Box::new(right));
+            left = Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::binary(Box::new(left), operator, Box::new(right)),
+            );
         }
 
         Ok(left)
@@ -402,7 +425,10 @@ impl Parser {
         while self.matches(&[TokenType::Slash, TokenType::Star]) {
             let operator = self.previous();
             let right = self.unary()?;
-            left = Expression::binary(Box::new(left), operator, Box::new(right));
+            left = Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::binary(Box::new(left), operator, Box::new(right)),
+            );
         }
 
         Ok(left)
@@ -412,7 +438,10 @@ impl Parser {
         if self.matches(&[TokenType::Bang, TokenType::Minus]) {
             let operator = self.previous();
             let right = self.unary()?;
-            return Ok(Expression::unary(operator, Box::new(right)));
+            return Ok(Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::unary(operator, Box::new(right)),
+            ));
         }
 
         self.call()
@@ -454,28 +483,46 @@ impl Parser {
             ParseErrorKind::ExpectedRightParenAfterFunctionArguments,
         )?;
 
-        Ok(Expression::call(Box::new(callee), paren, arguments))
+        Ok(Expression::new(
+            self.new_expression_id(),
+            ExpressionKind::call(Box::new(callee), paren, arguments),
+        ))
     }
 
     fn primary(&mut self) -> ParseResult<Expression> {
         if self.matches(&[TokenType::True]) {
-            return Ok(Expression::literal(Literal::True));
+            return Ok(Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::literal(Literal::True),
+            ));
         }
 
         if self.matches(&[TokenType::False]) {
-            return Ok(Expression::literal(Literal::False));
+            return Ok(Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::literal(Literal::False),
+            ));
         }
 
         if self.matches(&[TokenType::Nil]) {
-            return Ok(Expression::literal(Literal::Nil));
+            return Ok(Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::literal(Literal::Nil),
+            ));
         }
 
         if self.matches(&[TokenType::Number, TokenType::String]) {
-            return Ok(Expression::literal(self.previous().literal.unwrap()));
+            return Ok(Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::literal(self.previous().literal.unwrap()),
+            ));
         }
 
         if self.matches(&[TokenType::Identifier]) {
-            return Ok(Expression::variable(self.previous()));
+            return Ok(Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::variable(self.previous()),
+            ));
         }
 
         if self.matches(&[TokenType::LeftParen]) {
@@ -485,7 +532,12 @@ impl Parser {
                     TokenType::RightParen,
                     ParseErrorKind::ExpectedRightParenthesis,
                 )
-                .map(|_| Expression::grouping(Box::new(expression)));
+                .map(|_| {
+                    Expression::new(
+                        self.new_expression_id(),
+                        ExpressionKind::grouping(Box::new(expression)),
+                    )
+                });
         }
 
         Err(ParseError {
@@ -570,6 +622,12 @@ impl Parser {
 
             self.advance();
         }
+    }
+
+    fn new_expression_id(&mut self) -> usize {
+        let new_id = self.expression_id.checked_add(1).unwrap();
+        self.expression_id = new_id;
+        new_id
     }
 }
 

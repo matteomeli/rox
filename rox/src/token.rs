@@ -1,6 +1,6 @@
 use crate::types::Literal;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum TokenType {
     // Single character tokens
     LeftParen,

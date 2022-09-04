@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Expression, ExpressionVisitor},
+    ast::{Expression, ExpressionKind, ExpressionVisitor},
     token::TokenType,
     types::Literal,
 };
@@ -17,31 +17,56 @@ impl ExpressionVisitor for AstPrinter {
 
     fn visit_expr(&mut self, expression: &Expression) -> Self::Result {
         match expression {
-            Expression::Binary {
-                left,
-                operator,
-                right,
+            Expression {
+                kind:
+                    ExpressionKind::Binary {
+                        left,
+                        operator,
+                        right,
+                    },
+                ..
             } => format!(
                 "({} {} {})",
                 operator.lexeme,
                 left.accept(self),
                 right.accept(self)
             ),
-            Expression::Grouping { expr } => format!("(group {})", expr.accept(self)),
-            Expression::Literal { literal } => match literal {
+            Expression {
+                kind: ExpressionKind::Grouping { expr },
+                ..
+            } => format!("(group {})", expr.accept(self)),
+            Expression {
+                kind: ExpressionKind::Literal { literal },
+                ..
+            } => match literal {
                 Literal::Nil => "nil".to_string(),
                 Literal::String(s) => s.to_owned(),
                 Literal::Number(n) => n.to_string(),
                 Literal::False => "false".to_string(),
                 Literal::True => "true".to_string(),
             },
-            Expression::Unary { operator, expr } => {
+            Expression {
+                kind: ExpressionKind::Unary { operator, expr },
+                ..
+            } => {
                 format!("({} {})", operator.lexeme, expr.accept(self))
             }
-            Expression::Variable { name } => format!("var {}", &name.lexeme),
-            Expression::Assign { .. } => todo!(),
-            Expression::Logical { .. } => todo!(),
-            Expression::Call { .. } => todo!(),
+            Expression {
+                kind: ExpressionKind::Variable { name },
+                ..
+            } => format!("var {}", &name.lexeme),
+            Expression {
+                kind: ExpressionKind::Assign { .. },
+                ..
+            } => todo!(),
+            Expression {
+                kind: ExpressionKind::Logical { .. },
+                ..
+            } => todo!(),
+            Expression {
+                kind: ExpressionKind::Call { .. },
+                ..
+            } => todo!(),
         }
     }
 }
@@ -59,25 +84,38 @@ impl ExpressionVisitor for RPNPrinter {
 
     fn visit_expr(&mut self, expression: &Expression) -> Self::Result {
         match expression {
-            Expression::Binary {
-                left,
-                operator,
-                right,
+            Expression {
+                kind:
+                    ExpressionKind::Binary {
+                        left,
+                        operator,
+                        right,
+                    },
+                ..
             } => format!(
                 "{} {} {}",
                 left.accept(self),
                 right.accept(self),
                 operator.lexeme,
             ),
-            Expression::Grouping { expr } => expr.accept(self),
-            Expression::Literal { literal } => match literal {
+            Expression {
+                kind: ExpressionKind::Grouping { expr },
+                ..
+            } => expr.accept(self),
+            Expression {
+                kind: ExpressionKind::Literal { literal },
+                ..
+            } => match literal {
                 Literal::Nil => "nil".to_string(),
                 Literal::String(s) => s.to_owned(),
                 Literal::Number(n) => n.to_string(),
                 Literal::False => "false".to_string(),
                 Literal::True => "true".to_string(),
             },
-            Expression::Unary { operator, expr } => {
+            Expression {
+                kind: ExpressionKind::Unary { operator, expr },
+                ..
+            } => {
                 let operator = if operator.token_type == TokenType::Minus {
                     "~"
                 } else {
@@ -85,10 +123,22 @@ impl ExpressionVisitor for RPNPrinter {
                 };
                 format!("{} {}", operator, expr.accept(self))
             }
-            Expression::Variable { name } => format!("var {}", &name.lexeme),
-            Expression::Assign { .. } => todo!(),
-            Expression::Logical { .. } => todo!(),
-            Expression::Call { .. } => todo!(),
+            Expression {
+                kind: ExpressionKind::Variable { name },
+                ..
+            } => format!("var {}", &name.lexeme),
+            Expression {
+                kind: ExpressionKind::Assign { .. },
+                ..
+            } => todo!(),
+            Expression {
+                kind: ExpressionKind::Logical { .. },
+                ..
+            } => todo!(),
+            Expression {
+                kind: ExpressionKind::Call { .. },
+                ..
+            } => todo!(),
         }
     }
 }

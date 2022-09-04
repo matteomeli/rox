@@ -9,6 +9,7 @@ use std::{
 use rox::{
     interpreter::{InterpretError, Interpreter},
     parser::Parser,
+    resolver::Resolver,
     scanner::Scanner,
 };
 
@@ -63,6 +64,10 @@ impl Rox {
         } else {
             parser.parse()?
         };
+
+        // Resolve variables and bindings
+        let mut resolver = Resolver::new(&mut self.interpreter);
+        resolver.resolve(&statements)?;
 
         // Interpret AST
         if is_repl {
