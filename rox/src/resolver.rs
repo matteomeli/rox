@@ -58,8 +58,6 @@ impl<'a> Resolver<'a> {
                 return Ok(());
             }
         }
-
-        // TODO: What about if we don't find name in any scope? Shouldn't that case be an error?
         Ok(())
     }
 
@@ -75,15 +73,13 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_local(&mut self, expression_id: usize, name: &Token) {
-        for (index, scope) in self.scopes.iter().rev().enumerate() {
+        for (index, scope) in self.scopes.iter().enumerate().rev() {
             if scope.contains_key(&name.lexeme) {
                 self.interpreter
                     .resolve(expression_id, self.scopes.len() - index - 1);
                 return;
             }
         }
-
-        // TODO: What about if we don't find name in any scope? Shouldn't that case be an error?
     }
 
     fn resolve_function(

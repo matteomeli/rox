@@ -3,6 +3,24 @@ fun fib(n) {
   return fib(n - 2) + fib(n - 1);
 }
 
+print "[for]:";
+
 for (var i = 0; i < 20; i = i + 1) {
+  if (i == 1) {
+    continue;
+  }
   print fib(i);
+}
+
+print "";
+print "[while]:";
+
+var i = 0;
+while (i < 20) {
+  if (i == 1) {
+    i = i + 1;
+    continue;
+  }
+  print fib(i);
+  i = i + 1;
 }

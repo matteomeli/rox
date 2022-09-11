@@ -178,47 +178,42 @@ impl Parser {
             Some(self.expr_statement()?)
         };
 
-        let while_statement = {
-            let condition = if !self.check(TokenType::Semicolon) {
-                self.expression()?
-            } else {
-                Expression::new(
-                    self.new_expression_id(),
-                    ExpressionKind::literal(Literal::True),
-                )
-            };
-            self.consume(
-                TokenType::Semicolon,
-                ParseErrorKind::ExpectedSemicolonAfterForCondition,
-            )?;
-
-            let increment = if !self.check(TokenType::RightParen) {
-                Some(self.expression()?)
-            } else {
-                None
-            };
-            self.consume(
-                TokenType::RightParen,
-                ParseErrorKind::ExpectedRightParenAfterForClauses,
-            )?;
-
-            let body = if let Some(inc) = increment {
-                Statement::block(vec![self.statement()?, Statement::expression(inc)])
-            } else {
-                self.statement()?
-            };
-
-            Statement::r#while(condition, Box::new(body))
+        let condition = if !self.check(TokenType::Semicolon) {
+            self.expression()?
+        } else {
+            Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::literal(Literal::True),
+            )
         };
+        self.consume(
+            TokenType::Semicolon,
+            ParseErrorKind::ExpectedSemicolonAfterForCondition,
+        )?;
+
+        let increment = if !self.check(TokenType::RightParen) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+        self.consume(
+            TokenType::RightParen,
+            ParseErrorKind::ExpectedRightParenAfterForClauses,
+        )?;
+
+        let mut body = self.statement()?;
+        if let Some(inc) = increment {
+            body = Statement::block(vec![body, Statement::expression(inc)]);
+        }
+
+        body = Statement::r#while(condition, Box::new(body));
 
         // Desugar for syntax into while construct
-        let for_statement = if let Some(init) = initializer {
-            Statement::block(vec![init, while_statement])
-        } else {
-            while_statement
-        };
+        if let Some(init) = initializer {
+            body = Statement::block(vec![init, body]);
+        }
 
-        Ok(for_statement)
+        Ok(body)
     }
 
     fn if_statement(&mut self) -> ParseResult<Statement> {

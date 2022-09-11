@@ -361,29 +361,27 @@ impl StatementVisitor for Interpreter {
             }
             Statement::While { condition, body } => {
                 while self.evaluate(condition)?.is_truthy() {
-                    let result = if let Statement::Block { ref statements } = body.as_ref() {
-                        match &statements[..] {
-                            // For loops are desugared by the [Parser] as while loops containing an "artificial" enclosing block
-                            // which in turn contains two statements: the original for-loop's block plus the increment statement, if any.
-                            // This structure is important to consider when implementing `continue` as the increment statememnt has to always run,
-                            // even when one of the statements in the for-loop's (desugared as while) block requests to continue to
-                            // the next iteration and skip the remainder statements of this one. Below is where this special case is handled.
-                            [Statement::Block { statements }, increment @ Statement::Expression(_)] =>
-                            {
-                                let result =
-                                    self.execute_block(statements, self.environment.clone())?;
-                                // When executing `block`, any statemement can produce a `continue`, a `break` or `return`,
-                                // skipping any statement that would follow in the block.
-                                // We want to make sure the increment statement is always executed even in those cases.
-                                self.execute(increment)?;
-                                result
-                            }
-                            _ => self.execute(body)?,
+                    // Need to handle special case of for loop desugared into while
+                    // Desugared for while loop structure is known and can be destructured as below:
+                    let result = if let Statement::Block {
+                        statements: outer_statements,
+                    } = body.as_ref()
+                    {
+                        // An outer block wraps an inner block (the actual for-loop block) and the increment expression (if any)
+                        if let [Statement::Block { statements }, increment @ Statement::Expression(_)] =
+                            &outer_statements[..]
+                        {
+                            let outer_env = self.environment.child();
+                            let inner_env = outer_env.child();
+                            let result = self.execute_block(statements, inner_env)?;
+                            self.execute_block(&[increment.clone()], outer_env)?;
+                            result
+                        } else {
+                            self.execute(body)?
                         }
                     } else {
                         self.execute(body)?
                     };
-
                     match result {
                         ExecutionResult::Break => break,
                         ExecutionResult::Return(_) => return Ok(result),
