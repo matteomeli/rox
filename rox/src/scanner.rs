@@ -1,3 +1,5 @@
+use unicode_segmentation::UnicodeSegmentation;
+
 use std::error::Error;
 use std::fmt;
 
@@ -42,47 +44,47 @@ impl Scanner {
     }
 
     fn is_at_end(&self) -> bool {
-        self.current >= self.source.len()
+        self.current >= self.source.graphemes(true).count()
     }
 
     fn scan_token(&mut self) -> ScanResult<()> {
         match self.advance() {
             // Single character tokens
-            '(' => self.add_token(TokenType::LeftParen, None),
-            ')' => self.add_token(TokenType::RightParen, None),
-            '{' => self.add_token(TokenType::LeftBrace, None),
-            '}' => self.add_token(TokenType::RightBrace, None),
-            ',' => self.add_token(TokenType::Comma, None),
-            '.' => self.add_token(TokenType::Dot, None),
-            '-' => self.add_token(TokenType::Minus, None),
-            '+' => self.add_token(TokenType::Plus, None),
-            ';' => self.add_token(TokenType::Semicolon, None),
-            '*' => self.add_token(TokenType::Star, None),
+            "(" => self.add_token(TokenType::LeftParen, None),
+            ")" => self.add_token(TokenType::RightParen, None),
+            "{" => self.add_token(TokenType::LeftBrace, None),
+            "}" => self.add_token(TokenType::RightBrace, None),
+            "," => self.add_token(TokenType::Comma, None),
+            "." => self.add_token(TokenType::Dot, None),
+            "-" => self.add_token(TokenType::Minus, None),
+            "+" => self.add_token(TokenType::Plus, None),
+            ";" => self.add_token(TokenType::Semicolon, None),
+            "*" => self.add_token(TokenType::Star, None),
 
             // One or two character tokens
-            '!' => {
-                if self.matches('=') {
+            "!" => {
+                if self.matches("=") {
                     self.add_token(TokenType::NotEqual, None)
                 } else {
                     self.add_token(TokenType::Bang, None)
                 }
             }
-            '=' => {
-                if self.matches('=') {
+            "=" => {
+                if self.matches("=") {
                     self.add_token(TokenType::EqualEqual, None)
                 } else {
                     self.add_token(TokenType::Equal, None)
                 }
             }
-            '>' => {
-                if self.matches('=') {
+            ">" => {
+                if self.matches("=") {
                     self.add_token(TokenType::GreaterEqual, None)
                 } else {
                     self.add_token(TokenType::Greater, None)
                 }
             }
-            '<' => {
-                if self.matches('=') {
+            "<" => {
+                if self.matches("=") {
                     self.add_token(TokenType::LessEqual, None)
                 } else {
                     self.add_token(TokenType::Less, None)
@@ -90,24 +92,24 @@ impl Scanner {
             }
 
             // Comments
-            '/' => {
-                if self.matches('/') {
-                    while let Some(c) = self.peek() {
+            "/" => {
+                if self.matches("/") {
+                    while let Some(str) = self.peek() {
                         // A comment goes until the end of the line
-                        if c == '\n' || self.is_at_end() {
+                        if str == "\n" || str == "\r\n" || self.is_at_end() {
                             break;
                         }
 
                         self.advance();
                     }
                     Ok(())
-                } else if self.matches('*') {
+                } else if self.matches("*") {
                     let mut opened = 1u32;
 
                     while !self.is_at_end() {
                         match (self.peek(), self.peek_next()) {
                             // A block comment goes until a "*/" pair is found
-                            (Some('*'), Some('/')) => {
+                            (Some("*"), Some("/")) => {
                                 self.advance();
                                 self.advance();
                                 opened -= 1;
@@ -116,12 +118,12 @@ impl Scanner {
                                 }
                             }
                             // Handle nested block comments
-                            (Some('/'), Some('*')) => {
+                            (Some("/"), Some("*")) => {
                                 self.advance();
                                 self.advance();
                                 opened -= 1;
                             }
-                            (Some('\n'), _) => {
+                            (Some("\n"), _) => {
                                 self.line -= 1;
                                 self.advance();
                             }
@@ -149,19 +151,20 @@ impl Scanner {
             // Is adding support for nesting more work than you expected? Why?
 
             // Ignore whitespace
-            ' ' | '\r' | '\t' => Ok(()),
+            " " | "\r" | "\t" => Ok(()),
 
-            '\n' => {
+            // Newline
+            "\n" | "\r\n" => {
                 self.line += 1;
                 Ok(())
             }
 
-            '"' => self.string(),
+            r#"""# => self.string(),
 
-            c => {
-                if Scanner::is_digit(c) {
+            str => {
+                if Scanner::is_digit(str) {
                     self.number()
-                } else if Scanner::is_alpha(c) {
+                } else if Scanner::is_alpha(str) {
                     self.identifier()
                 } else {
                     Err(ScanError::new(
@@ -174,22 +177,22 @@ impl Scanner {
     }
 
     fn number(&mut self) -> ScanResult<()> {
-        while let Some(c) = self.peek() {
-            if !Scanner::is_digit(c) {
+        while let Some(str) = self.peek() {
+            if !Scanner::is_digit(str) {
                 break;
             }
             self.advance();
         }
 
         // Look for a fractional part
-        if let Some('.') = self.peek() {
-            if let Some(c) = self.peek_next() {
-                if Scanner::is_digit(c) {
+        if let Some(".") = self.peek() {
+            if let Some(str) = self.peek_next() {
+                if Scanner::is_digit(str) {
                     // Consume .
                     self.advance();
 
-                    while let Some(c) = self.peek() {
-                        if !Scanner::is_digit(c) {
+                    while let Some(str) = self.peek() {
+                        if !Scanner::is_digit(str) {
                             break;
                         }
                         self.advance();
@@ -201,7 +204,7 @@ impl Scanner {
         let literal_length = self.current - self.start;
         let number_literal = Literal::Number(
             self.source
-                .chars()
+                .graphemes(true)
                 .skip(self.start)
                 .take(literal_length)
                 .collect::<String>()
@@ -212,8 +215,8 @@ impl Scanner {
     }
 
     fn identifier(&mut self) -> ScanResult<()> {
-        while let Some(c) = self.peek() {
-            if !Scanner::is_alphanumeric(c) {
+        while let Some(str) = self.peek() {
+            if !Scanner::is_alphanumeric(str) {
                 break;
             }
             self.advance();
@@ -222,7 +225,7 @@ impl Scanner {
         let identifier_length = self.current - self.start;
         let identifier = self
             .source
-            .chars()
+            .graphemes(true)
             .skip(self.start)
             .take(identifier_length)
             .collect::<String>();
@@ -252,25 +255,25 @@ impl Scanner {
         self.add_token(token_type, None)
     }
 
-    fn is_digit(c: char) -> bool {
-        c.is_ascii_digit()
+    fn is_digit(str: &str) -> bool {
+        str.bytes().all(|c| c.is_ascii_digit())
     }
 
-    fn is_alpha(c: char) -> bool {
-        c.is_ascii_alphabetic() || c == '_'
+    fn is_alpha(str: &str) -> bool {
+        str.bytes().all(|c| c.is_ascii_alphabetic()) || str == "_"
     }
 
-    fn is_alphanumeric(c: char) -> bool {
-        c.is_ascii_alphanumeric()
+    fn is_alphanumeric(str: &str) -> bool {
+        str.bytes().all(|c| c.is_ascii_alphanumeric())
     }
 
     fn string(&mut self) -> ScanResult<()> {
-        while let Some(c) = self.peek() {
-            if c == '"' || self.is_at_end() {
+        while let Some(str) = self.peek() {
+            if str == r#"""# || self.is_at_end() {
                 break;
             }
 
-            if let Some('\n') = self.peek() {
+            if let Some("\n") = self.peek() {
                 self.line += 1;
             }
 
@@ -288,7 +291,7 @@ impl Scanner {
         let literal_length = (self.current - 1) - (self.start + 1);
         let string_literal = Literal::String(
             self.source
-                .chars()
+                .graphemes(true)
                 .skip(self.start + 1)
                 .take(literal_length)
                 .collect(),
@@ -296,29 +299,23 @@ impl Scanner {
         self.add_token(TokenType::String, Some(string_literal))
     }
 
-    fn peek(&self) -> Option<char> {
-        if self.is_at_end() {
-            return None;
-        }
-
-        self.source.chars().nth(self.current)
+    fn peek(&self) -> Option<&str> {
+        self.source.graphemes(true).nth(self.current)
     }
 
-    fn peek_next(&self) -> Option<char> {
-        if self.current + 1 >= self.source.len() {
-            return None;
-        }
-
-        self.source.chars().nth(self.current + 1)
+    fn peek_next(&self) -> Option<&str> {
+        self.source.graphemes(true).nth(self.current + 1)
     }
 
-    fn matches(&mut self, expected: char) -> bool {
+    fn matches(&mut self, expected: &str) -> bool {
         if self.is_at_end() {
             return false;
         }
 
-        if self.source.chars().nth(self.current).unwrap() != expected {
-            return false;
+        if let Some(str) = self.source.graphemes(true).nth(self.current) {
+            if str != expected {
+                return false;
+            }
         }
 
         self.current += 1;
@@ -326,17 +323,23 @@ impl Scanner {
         true
     }
 
-    fn advance(&mut self) -> char {
-        let c = self.source.chars().nth(self.current).unwrap();
+    fn advance(&mut self) -> &str {
+        // SAFETY: By construction advance() is only called after checking if is_at_end()
+        let grapheme = unsafe {
+            self.source
+                .graphemes(true)
+                .nth(self.current)
+                .unwrap_unchecked()
+        };
         self.current += 1;
-        c
+        grapheme
     }
 
     fn add_token(&mut self, token_type: TokenType, literal: Option<Literal>) -> ScanResult<()> {
         let lexeme_length = self.current - self.start;
         let lexeme = self
             .source
-            .chars()
+            .graphemes(true)
             .skip(self.start)
             .take(lexeme_length)
             .collect();

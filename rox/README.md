@@ -8,5 +8,4 @@ TODO:
 * Add solutions for chapter 11 challenges
 * Add solutions for chapter 12 challenges
 * Add solutions for chapter 13 challenges
-* Correctly handle UTF8 characters in scanner
 * Add tests

@@ -120,9 +120,9 @@ BostonCream().cook();
 class Eclair {
   cook() {
     //super.cook();
-    //print "Pipe full of crème pâtissière.";
-    print "Pipe full of creme patissiere.";
+    print "Pipe full of crème pâtissière.";
   }
 }
+Eclair().cook();
 
 //super.notEvenInAClass();
