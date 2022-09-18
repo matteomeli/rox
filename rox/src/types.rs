@@ -1,6 +1,9 @@
 use std::fmt::{Debug, Display};
 
-use crate::callable::Callable;
+use crate::{
+    callable::Callable,
+    class::{Class, Instance},
+};
 
 #[derive(Debug, Clone)]
 pub enum Literal {
@@ -17,6 +20,8 @@ pub enum Type {
     Number(f64),
     Boolean(bool),
     Callable(Box<dyn Callable>),
+    Class(Class),
+    Instance(Instance),
     Nil,
 }
 
@@ -38,6 +43,8 @@ impl Display for Type {
             Self::String(s) => write!(f, "{}", s),
             Self::Number(n) => write!(f, "{}", n),
             Self::Callable(c) => write!(f, "{}", c),
+            Self::Class(k) => write!(f, "{}", k),
+            Self::Instance(ki) => write!(f, "{}", ki),
         }
     }
 }

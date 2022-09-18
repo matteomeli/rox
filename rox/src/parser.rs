@@ -1,7 +1,7 @@
 use std::{error::Error, fmt};
 
 use crate::{
-    ast::{Expression, ExpressionKind, Statement},
+    ast::{Expression, ExpressionKind, FunctionDeclaration, Statement},
     token::{Token, TokenType},
     types::Literal,
 };
@@ -42,8 +42,10 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> ParseResult<Statement> {
-        let result = if self.matches(&[TokenType::Fun]) {
-            self.function()
+        let result = if self.matches(&[TokenType::Class]) {
+            self.class_declaration()
+        } else if self.matches(&[TokenType::Fun]) {
+            self.function(false).map(Statement::function)
         } else if self.matches(&[TokenType::Var]) {
             self.var_declaration()
         } else {
@@ -56,17 +58,51 @@ impl Parser {
         })
     }
 
-    fn function(&mut self) -> ParseResult<Statement> {
-        let name = self.consume(TokenType::Identifier, ParseErrorKind::ExpectedFucntionName)?;
-        self.consume(TokenType::LeftParen, ParseErrorKind::ExpectedFucntionName)?;
+    fn class_declaration(&mut self) -> ParseResult<Statement> {
+        let name = self.consume(TokenType::Identifier, ParseErrorKind::ExpectedClassName)?;
+        self.consume(
+            TokenType::LeftBrace,
+            ParseErrorKind::ExpectedLeftBraceBeforeClassBody,
+        )?;
+
+        let mut methods = Vec::new();
+        while !self.check(TokenType::RightBrace) && !self.is_at_end() {
+            methods.push(self.function(true)?);
+        }
+
+        self.consume(
+            TokenType::RightBrace,
+            ParseErrorKind::ExpectedRightBraceAfterClassBody,
+        )?;
+
+        Ok(Statement::class(name, methods))
+    }
+
+    fn function(&mut self, is_method: bool) -> ParseResult<FunctionDeclaration> {
+        let name = self.consume(
+            TokenType::Identifier,
+            if is_method {
+                ParseErrorKind::ExpectedMethodName
+            } else {
+                ParseErrorKind::ExpectedFucntionName
+            },
+        )?;
+        self.consume(
+            TokenType::LeftParen,
+            if is_method {
+                ParseErrorKind::ExpectedLeftParenAfterMethodNeme
+            } else {
+                ParseErrorKind::ExpectedLeftParenAfterFunctionNeme
+            },
+        )?;
         let mut params = Vec::new();
         if !self.check(TokenType::RightParen) {
             loop {
                 if params.len() >= 255 {
-                    return Err(ParseError {
-                        token: self.peek(),
-                        kind: ParseErrorKind::TooManyFunctionArguments,
-                    });
+                    return Err(ParseError::new(
+                        self.peek(),
+                        ParseErrorKind::TooManyFunctionArguments,
+                    ));
                 }
 
                 params
@@ -84,11 +120,15 @@ impl Parser {
 
         self.consume(
             TokenType::LeftBrace,
-            ParseErrorKind::ExpectedLeftBraceBeforeFunctionBody,
+            if is_method {
+                ParseErrorKind::ExpectedLeftBraceBeforeMethodBody
+            } else {
+                ParseErrorKind::ExpectedLeftBraceBeforeFunctionBody
+            },
         )?;
         let body = self.block()?;
 
-        Ok(Statement::function(name, params, body))
+        Ok(FunctionDeclaration::new(name, params, body))
     }
 
     fn var_declaration(&mut self) -> ParseResult<Statement> {
@@ -136,10 +176,10 @@ impl Parser {
 
     fn break_statement(&mut self) -> ParseResult<Statement> {
         if self.loop_depth == 0 {
-            return Err(ParseError {
-                token: self.previous(),
-                kind: ParseErrorKind::ExpectedEnclosingLoopToBreak,
-            });
+            return Err(ParseError::new(
+                self.previous(),
+                ParseErrorKind::ExpectedEnclosingLoopToBreak,
+            ));
         }
 
         self.consume(
@@ -151,10 +191,10 @@ impl Parser {
 
     fn continue_statement(&mut self) -> ParseResult<Statement> {
         if self.loop_depth == 0 {
-            return Err(ParseError {
-                token: self.previous(),
-                kind: ParseErrorKind::ExpectedEnclosingLoopToContinue,
-            });
+            return Err(ParseError::new(
+                self.previous(),
+                ParseErrorKind::ExpectedEnclosingLoopToContinue,
+            ));
         }
 
         self.consume(
@@ -315,20 +355,29 @@ impl Parser {
         let expression = self.or()?;
 
         if self.matches(&[TokenType::Equal]) {
-            let equals = self.previous();
+            let equals_token = self.previous();
             let value = self.assignment()?;
 
-            if let ExpressionKind::Variable { name } = expression.kind {
-                return Ok(Expression::new(
-                    self.new_expression_id(),
-                    ExpressionKind::assign(name, Box::new(value)),
-                ));
+            match expression.kind {
+                ExpressionKind::Variable { name } => {
+                    return Ok(Expression::new(
+                        self.new_expression_id(),
+                        ExpressionKind::assign(name, Box::new(value)),
+                    ))
+                }
+                ExpressionKind::Get { object, name } => {
+                    return Ok(Expression::new(
+                        self.new_expression_id(),
+                        ExpressionKind::set(object, name, Box::new(value)),
+                    ))
+                }
+                _ => {
+                    return Err(ParseError::new(
+                        equals_token,
+                        ParseErrorKind::InvalidAssignmentTarget,
+                    ))
+                }
             }
-
-            return Err(ParseError {
-                token: equals,
-                kind: ParseErrorKind::InvalidAssignmentTarget,
-            });
         }
 
         Ok(expression)
@@ -448,6 +497,15 @@ impl Parser {
         loop {
             if self.matches(&[TokenType::LeftParen]) {
                 expression = self.finish_call(expression)?;
+            } else if self.matches(&[TokenType::Dot]) {
+                let name = self.consume(
+                    TokenType::Identifier,
+                    ParseErrorKind::ExpectedPropertyNameAfterDot,
+                )?;
+                expression = Expression::new(
+                    self.new_expression_id(),
+                    ExpressionKind::get(Box::new(expression), name),
+                );
             } else {
                 break;
             }
@@ -461,10 +519,10 @@ impl Parser {
         if !self.check(TokenType::RightParen) {
             loop {
                 if arguments.len() >= 255 {
-                    return Err(ParseError {
-                        token: self.peek(),
-                        kind: ParseErrorKind::TooManyFunctionArguments,
-                    });
+                    return Err(ParseError::new(
+                        self.peek(),
+                        ParseErrorKind::TooManyFunctionArguments,
+                    ));
                 }
                 arguments.push(self.expression()?);
                 if !self.matches(&[TokenType::Comma]) {
@@ -513,6 +571,13 @@ impl Parser {
             ));
         }
 
+        if self.matches(&[TokenType::This]) {
+            return Ok(Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::this(self.previous()),
+            ));
+        }
+
         if self.matches(&[TokenType::Identifier]) {
             return Ok(Expression::new(
                 self.new_expression_id(),
@@ -535,10 +600,10 @@ impl Parser {
                 });
         }
 
-        Err(ParseError {
-            token: self.peek(),
-            kind: ParseErrorKind::ExpectedExpression,
-        })
+        Err(ParseError::new(
+            self.peek(),
+            ParseErrorKind::ExpectedExpression,
+        ))
     }
 
     fn matches(&mut self, token_types: &[TokenType]) -> bool {
@@ -585,10 +650,7 @@ impl Parser {
             return Ok(self.advance());
         }
 
-        Err(ParseError {
-            token: self.peek(),
-            kind: error_kind,
-        })
+        Err(ParseError::new(self.peek(), error_kind))
     }
 
     fn synchronize(&mut self) {
@@ -633,6 +695,10 @@ pub struct ParseError {
 }
 
 impl ParseError {
+    pub fn new(token: Token, kind: ParseErrorKind) -> Self {
+        ParseError { token, kind }
+    }
+
     pub fn should_synchronize(&self) -> bool {
         !matches!(
             self.kind,
@@ -680,11 +746,19 @@ pub enum ParseErrorKind {
     ExpectedRightParenAfterFunctionArguments,
     TooManyFunctionArguments,
     ExpectedFucntionName,
+    ExpectedMethodName,
+    ExpectedLeftParenAfterFunctionNeme,
+    ExpectedLeftParenAfterMethodNeme,
     TooManyFunctionParams,
     ExpectedParamName,
     ExpectedRightParenAfterParams,
     ExpectedLeftBraceBeforeFunctionBody,
+    ExpectedLeftBraceBeforeMethodBody,
     ExpectedSemicolonAfterReturnValue,
+    ExpectedClassName,
+    ExpectedLeftBraceBeforeClassBody,
+    ExpectedRightBraceAfterClassBody,
+    ExpectedPropertyNameAfterDot,
 }
 
 impl fmt::Display for ParseErrorKind {
@@ -733,6 +807,15 @@ impl fmt::Display for ParseErrorKind {
             Self::ExpectedFucntionName => {
                 write!(f, "Expected function name.")
             }
+            Self::ExpectedMethodName => {
+                write!(f, "Expected method name.")
+            }
+            Self::ExpectedLeftParenAfterFunctionNeme => {
+                write!(f, "Expected '(' after function name.")
+            }
+            Self::ExpectedLeftParenAfterMethodNeme => {
+                write!(f, "Expected '(' after method name.")
+            }
             Self::TooManyFunctionParams => {
                 write!(f, "Cannot have more than 255 function parameters.")
             }
@@ -745,8 +828,23 @@ impl fmt::Display for ParseErrorKind {
             Self::ExpectedLeftBraceBeforeFunctionBody => {
                 write!(f, "Expected '{{' before function body.")
             }
+            Self::ExpectedLeftBraceBeforeMethodBody => {
+                write!(f, "Expected '{{' before method body.")
+            }
             Self::ExpectedSemicolonAfterReturnValue => {
                 write!(f, "Expected ';' after 'return'  alue.")
+            }
+            Self::ExpectedClassName => {
+                write!(f, "Expected class name.")
+            }
+            Self::ExpectedLeftBraceBeforeClassBody => {
+                write!(f, "Expected '{{' before class body.")
+            }
+            Self::ExpectedRightBraceAfterClassBody => {
+                write!(f, "Expected '}}' after class body.")
+            }
+            Self::ExpectedPropertyNameAfterDot => {
+                write!(f, "Expected property name after '.'.")
             }
         }
     }

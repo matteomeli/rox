@@ -67,6 +67,18 @@ impl ExpressionVisitor for AstPrinter {
                 kind: ExpressionKind::Call { .. },
                 ..
             } => todo!(),
+            Expression {
+                kind: ExpressionKind::Get { .. },
+                ..
+            } => todo!(),
+            Expression {
+                kind: ExpressionKind::Set { .. },
+                ..
+            } => todo!(),
+            Expression {
+                kind: ExpressionKind::This { .. },
+                ..
+            } => todo!(),
         }
     }
 }
@@ -137,6 +149,18 @@ impl ExpressionVisitor for RPNPrinter {
             } => todo!(),
             Expression {
                 kind: ExpressionKind::Call { .. },
+                ..
+            } => todo!(),
+            Expression {
+                kind: ExpressionKind::Get { .. },
+                ..
+            } => todo!(),
+            Expression {
+                kind: ExpressionKind::Set { .. },
+                ..
+            } => todo!(),
+            Expression {
+                kind: ExpressionKind::This { .. },
                 ..
             } => todo!(),
         }

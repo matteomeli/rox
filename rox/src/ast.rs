@@ -36,8 +36,12 @@ pub enum ExpressionKind {
     },
     Call {
         callee: Box<Expression>,
-        paren: Token,
+        location: Token,
         arguments: Vec<Expression>,
+    },
+    Get {
+        object: Box<Expression>,
+        name: Token,
     },
     Grouping {
         expr: Box<Expression>,
@@ -49,6 +53,14 @@ pub enum ExpressionKind {
         left: Box<Expression>,
         operator: Token,
         right: Box<Expression>,
+    },
+    Set {
+        object: Box<Expression>,
+        name: Token,
+        value: Box<Expression>,
+    },
+    This {
+        keyword: Token,
     },
     Unary {
         operator: Token,
@@ -72,12 +84,16 @@ impl ExpressionKind {
         }
     }
 
-    pub fn call(callee: Box<Expression>, paren: Token, arguments: Vec<Expression>) -> Self {
+    pub fn call(callee: Box<Expression>, location: Token, arguments: Vec<Expression>) -> Self {
         ExpressionKind::Call {
             callee,
-            paren,
+            location,
             arguments,
         }
+    }
+
+    pub fn get(object: Box<Expression>, name: Token) -> Self {
+        ExpressionKind::Get { object, name }
     }
 
     pub fn grouping(expr: Box<Expression>) -> Self {
@@ -94,6 +110,18 @@ impl ExpressionKind {
             operator,
             right,
         }
+    }
+
+    pub fn set(object: Box<Expression>, name: Token, value: Box<Expression>) -> Self {
+        ExpressionKind::Set {
+            object,
+            name,
+            value,
+        }
+    }
+
+    pub fn this(keyword: Token) -> Self {
+        ExpressionKind::This { keyword }
     }
 
     pub fn unary(operator: Token, expr: Box<Expression>) -> Self {
@@ -117,6 +145,10 @@ pub enum Statement {
         statements: Vec<Statement>,
     },
     Break,
+    Class {
+        name: Token,
+        methods: Vec<FunctionDeclaration>,
+    },
     Continue,
     Expression(Expression),
     Function(FunctionDeclaration),
@@ -149,6 +181,10 @@ impl Statement {
         Statement::Break
     }
 
+    pub fn class(name: Token, methods: Vec<FunctionDeclaration>) -> Self {
+        Statement::Class { name, methods }
+    }
+
     pub fn r#continue() -> Self {
         Statement::Continue
     }
@@ -157,8 +193,8 @@ impl Statement {
         Statement::Expression(expression)
     }
 
-    pub fn function(name: Token, params: Vec<Token>, body: Vec<Statement>) -> Self {
-        Statement::Function(FunctionDeclaration { name, params, body })
+    pub fn function(function: FunctionDeclaration) -> Self {
+        Statement::Function(function)
     }
 
     pub fn r#if(
@@ -199,4 +235,10 @@ pub struct FunctionDeclaration {
     pub name: Token,
     pub params: Vec<Token>,
     pub body: Vec<Statement>,
+}
+
+impl FunctionDeclaration {
+    pub fn new(name: Token, params: Vec<Token>, body: Vec<Statement>) -> Self {
+        FunctionDeclaration { name, params, body }
+    }
 }

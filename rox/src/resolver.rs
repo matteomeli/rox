@@ -6,19 +6,28 @@ use crate::{
         StatementVisitor,
     },
     interpreter::Interpreter,
-    token::Token,
+    token::{Token, TokenType},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FunctionType {
     None,
     Function,
+    Initializer,
+    Method,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ClassType {
+    None,
+    Class,
 }
 
 pub struct Resolver<'a> {
     interpreter: &'a mut Interpreter,
     scopes: Vec<HashMap<String, bool>>,
     current_function_type: FunctionType,
+    current_class_type: ClassType,
 }
 
 impl<'a> Resolver<'a> {
@@ -27,6 +36,7 @@ impl<'a> Resolver<'a> {
             interpreter,
             scopes: Vec::new(),
             current_function_type: FunctionType::None,
+            current_class_type: ClassType::None,
         }
     }
 
@@ -53,7 +63,10 @@ impl<'a> Resolver<'a> {
     fn declare(&mut self, name: &Token) -> ResolveResult<()> {
         if let Some(scope) = self.scopes.last_mut() {
             if scope.insert(name.lexeme.clone(), false).is_some() {
-                return Err(ResolveError::CannotReadLocalVariableInOwnInitializer);
+                return Err(ResolveError::new(
+                    name.clone(),
+                    ResolveErrorKind::CannotReadLocalVariableInOwnInitializer,
+                ));
             } else {
                 return Ok(());
             }
@@ -143,6 +156,13 @@ impl<'a> ExpressionVisitor for Resolver<'a> {
                 Ok(())
             }
             Expression {
+                kind: ExpressionKind::Get { object, .. },
+                ..
+            } => {
+                self.resolve_expr(object)?;
+                Ok(())
+            }
+            Expression {
                 kind: ExpressionKind::Grouping { expr },
                 ..
             } => {
@@ -162,6 +182,27 @@ impl<'a> ExpressionVisitor for Resolver<'a> {
                 Ok(())
             }
             Expression {
+                kind: ExpressionKind::Set { object, value, .. },
+                ..
+            } => {
+                self.resolve_expr(value)?;
+                self.resolve_expr(object)?;
+                Ok(())
+            }
+            Expression {
+                id,
+                kind: ExpressionKind::This { keyword },
+            } => {
+                if self.current_class_type == ClassType::None {
+                    return Err(ResolveError::new(
+                        keyword.clone(),
+                        ResolveErrorKind::CannotUseThisOutsideClass,
+                    ));
+                }
+                self.resolve_local(*id, keyword);
+                Ok(())
+            }
+            Expression {
                 kind: ExpressionKind::Unary { expr, .. },
                 ..
             } => {
@@ -175,7 +216,10 @@ impl<'a> ExpressionVisitor for Resolver<'a> {
                 if !self.scopes.is_empty() {
                     if let Some(scope) = self.scopes.last() {
                         if let Some(false) = scope.get(&name.lexeme) {
-                            return Err(ResolveError::CannotReadLocalVariableInOwnInitializer);
+                            return Err(ResolveError::new(
+                                name.clone(),
+                                ResolveErrorKind::CannotReadLocalVariableInOwnInitializer,
+                            ));
                         }
                     }
                 }
@@ -196,6 +240,36 @@ impl<'a> StatementVisitor for Resolver<'a> {
                 self.begin_scope();
                 self.resolve(statements)?;
                 self.end_scope();
+                Ok(())
+            }
+            Statement::Class { name, methods } => {
+                let enclosing_class_type = self.current_class_type;
+                self.current_class_type = ClassType::Class;
+
+                self.declare(name)?;
+                self.define(name);
+
+                self.begin_scope();
+                unsafe {
+                    self.scopes
+                        .last_mut()
+                        .unwrap_unchecked()
+                        .insert("this".to_string(), true);
+                }
+
+                for method in methods {
+                    let function_type = if method.name.lexeme == "init" {
+                        FunctionType::Initializer
+                    } else {
+                        FunctionType::Method
+                    };
+                    self.resolve_function(method, function_type)?;
+                }
+
+                self.end_scope();
+
+                self.current_class_type = enclosing_class_type;
+
                 Ok(())
             }
             Statement::Var { name, initializer } => {
@@ -233,12 +307,22 @@ impl<'a> StatementVisitor for Resolver<'a> {
                 self.resolve_expr(expression)?;
                 Ok(())
             }
-            Statement::Return { value, .. } => {
+            Statement::Return { value, keyword } => {
                 if self.current_function_type == FunctionType::None {
-                    return Err(ResolveError::CannotReadLocalVariableInOwnInitializer);
+                    return Err(ResolveError::new(
+                        keyword.clone(),
+                        ResolveErrorKind::CannotReadLocalVariableInOwnInitializer,
+                    ));
                 }
 
                 if let Some(expression) = value {
+                    if self.current_function_type == FunctionType::Initializer {
+                        return Err(ResolveError::new(
+                            keyword.clone(),
+                            ResolveErrorKind::CannotReturnValueFromInitializer,
+                        ));
+                    }
+
                     self.resolve_expr(expression)?;
                 }
                 Ok(())
@@ -253,16 +337,44 @@ impl<'a> StatementVisitor for Resolver<'a> {
     }
 }
 
-#[derive(Debug)]
-pub enum ResolveError {
-    CannotReadLocalVariableInOwnInitializer,
-    VariableAlreadyPresentWithThisNameInScope,
-    CannotReturnFromTopLevelBlock,
+#[derive(Debug, Clone)]
+pub struct ResolveError {
+    token: Token,
+    kind: ResolveErrorKind,
+}
+
+impl ResolveError {
+    pub fn new(token: Token, kind: ResolveErrorKind) -> Self {
+        ResolveError { token, kind }
+    }
 }
 
 impl Error for ResolveError {}
 
 impl fmt::Display for ResolveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.token.token_type == TokenType::Eof {
+            write!(
+                f,
+                "[line {}] Resolve error at end: {}",
+                self.token.line, self.kind
+            )
+        } else {
+            write!(f, "[line {}] Resolve error: {}", self.token.line, self.kind)
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ResolveErrorKind {
+    CannotReadLocalVariableInOwnInitializer,
+    VariableAlreadyPresentWithThisNameInScope,
+    CannotReturnFromTopLevelBlock,
+    CannotUseThisOutsideClass,
+    CannotReturnValueFromInitializer,
+}
+
+impl fmt::Display for ResolveErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CannotReadLocalVariableInOwnInitializer => {
@@ -273,6 +385,12 @@ impl fmt::Display for ResolveError {
             }
             Self::CannotReturnFromTopLevelBlock => {
                 write!(f, "Cannot return from top-level block.")
+            }
+            Self::CannotUseThisOutsideClass => {
+                write!(f, "Cannot use 'this' outside of a class.")
+            }
+            Self::CannotReturnValueFromInitializer => {
+                write!(f, "Cannot return a value from an initializer.")
             }
         }
     }

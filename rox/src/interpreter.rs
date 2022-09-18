@@ -1,6 +1,7 @@
 use crate::{
     ast::{Expression, ExpressionKind, ExpressionVisitor, Statement, StatementVisitor},
-    callable::{Clock, Function},
+    callable::{Callable, Clock, Function},
+    class::{Class, ClassData},
     environment::Environment,
     token::{Token, TokenType},
     types::{Literal, Type},
@@ -10,6 +11,7 @@ use std::{
     collections::HashMap,
     error::Error,
     fmt::{self, Write},
+    rc::Rc,
 };
 
 pub struct Interpreter {
@@ -99,6 +101,32 @@ impl Interpreter {
 
     fn evaluate(&mut self, expression: &Expression) -> InterpretResult<Type> {
         expression.accept(self)
+    }
+
+    fn call_callable(
+        &mut self,
+        location: &Token,
+        callable: &dyn Callable,
+        arguments: &[Expression],
+    ) -> InterpretResult<Type> {
+        if arguments.len() != callable.arity() {
+            return Err(InterpretError::with_message(
+                location.clone(),
+                InterpretErrorKind::InvalidCallableArguments,
+                Some(format!(
+                    "Expected {} arguments, but got {}.",
+                    callable.arity(),
+                    arguments.len()
+                )),
+            ));
+        }
+
+        let mut evaluated_arguments = Vec::new();
+        for argument in arguments {
+            evaluated_arguments.push(self.evaluate(argument)?);
+        }
+
+        callable.call(self, evaluated_arguments)
     }
 }
 
@@ -201,38 +229,34 @@ impl ExpressionVisitor for Interpreter {
                 kind:
                     ExpressionKind::Call {
                         callee,
-                        paren,
+                        location,
                         arguments,
                     },
                 ..
+            } => match self.evaluate(callee)? {
+                Type::Callable(callable) => {
+                    self.call_callable(location, callable.as_ref(), arguments)
+                }
+                Type::Class(class) => self.call_callable(location, &class, arguments),
+                _ => Err(InterpretError::new(
+                    location.clone(),
+                    InterpretErrorKind::InvalidCallable,
+                )),
+            },
+            Expression {
+                kind: ExpressionKind::Get { object, name },
+                ..
             } => {
-                let callee = self.evaluate(callee)?;
-
-                let mut args = Vec::new();
-                for argument in arguments {
-                    args.push(self.evaluate(argument)?);
+                let object = self.evaluate(object)?;
+                if let Type::Instance(class_instance) = object {
+                    return class_instance.get(name).ok_or_else(|| {
+                        InterpretError::new(name.clone(), InterpretErrorKind::UndefinedProperty)
+                    });
                 }
-
-                if let Type::Callable(callable) = callee {
-                    if args.len() != callable.arity() {
-                        Err(InterpretError::with_message(
-                            paren.clone(),
-                            InterpretErrorKind::InvalidCallableArguments,
-                            Some(format!(
-                                "Expected {} arguments, but got {}.",
-                                callable.arity(),
-                                args.len()
-                            )),
-                        ))
-                    } else {
-                        callable.call(self, args)
-                    }
-                } else {
-                    Err(InterpretError::new(
-                        paren.clone(),
-                        InterpretErrorKind::InvalidCallable,
-                    ))
-                }
+                Err(InterpretError::new(
+                    name.clone(),
+                    InterpretErrorKind::OnlyClassInstancesHaveProperties,
+                ))
             }
             Expression {
                 kind: ExpressionKind::Grouping { expr },
@@ -269,6 +293,37 @@ impl ExpressionVisitor for Interpreter {
                 }
             }
             Expression {
+                kind:
+                    ExpressionKind::Set {
+                        object,
+                        name,
+                        value,
+                    },
+                ..
+            } => {
+                let object = self.evaluate(object)?;
+                if let Type::Instance(mut class_instance) = object {
+                    let value = self.evaluate(value)?;
+                    class_instance.set(name, value.clone());
+                    return Ok(value);
+                }
+
+                Err(InterpretError::new(
+                    name.clone(),
+                    InterpretErrorKind::OnlyClassInstancesHaveFields,
+                ))
+            }
+            Expression {
+                id,
+                kind: ExpressionKind::This { keyword },
+            } => match self.lookup_variable(keyword, *id) {
+                Some(Some(value)) => Ok(value),
+                _ => Err(InterpretError::new(
+                    keyword.clone(),
+                    InterpretErrorKind::UninitializedVariable,
+                )),
+            },
+            Expression {
                 kind: ExpressionKind::Unary { operator, expr },
                 ..
             } => {
@@ -288,11 +343,7 @@ impl ExpressionVisitor for Interpreter {
                 kind: ExpressionKind::Variable { name },
             } => match self.lookup_variable(name, *id) {
                 Some(Some(value)) => Ok(value),
-                Some(None) => Err(InterpretError::new(
-                    name.clone(),
-                    InterpretErrorKind::UninitializedVariable,
-                )),
-                None => Err(InterpretError::new(
+                _ => Err(InterpretError::new(
                     name.clone(),
                     InterpretErrorKind::UninitializedVariable,
                 )),
@@ -311,13 +362,32 @@ impl StatementVisitor for Interpreter {
                 self.execute_block(statements, environment)
             }
             Statement::Break => Ok(ExecutionResult::Break),
+            Statement::Class {
+                name,
+                methods: method_declarations,
+            } => {
+                self.environment.define(name.lexeme.clone(), None);
+                let mut methods = HashMap::new();
+                for declaration in method_declarations {
+                    let function = Function::new(
+                        declaration.clone(),
+                        self.environment.clone(),
+                        declaration.name.lexeme == "init",
+                    );
+                    methods.insert(declaration.name.lexeme.clone(), function);
+                }
+                let class_data = ClassData::new(name.lexeme.clone(), methods);
+                self.environment
+                    .assign(name, Type::Class(Class::new(Rc::new(class_data))));
+                Ok(ExecutionResult::Success)
+            }
             Statement::Continue => Ok(ExecutionResult::Continue),
             Statement::Expression(expression) => {
                 self.evaluate(expression)?;
                 Ok(ExecutionResult::Success)
             }
             Statement::Function(declaration) => {
-                let function = Function::new(declaration.clone(), self.environment.clone());
+                let function = Function::new(declaration.clone(), self.environment.clone(), false);
                 self.environment.define(
                     declaration.name.lexeme.clone(),
                     Some(Type::Callable(Box::new(function))),
@@ -486,6 +556,21 @@ impl fmt::Display for InterpretError {
                     .as_deref()
                     .unwrap_or("Invalid number of arguments to callable")
             ),
+            InterpretErrorKind::OnlyClassInstancesHaveProperties => write!(
+                f,
+                "[line {}] Runtime error: Only class instances have properties.",
+                self.token.line
+            ),
+            InterpretErrorKind::OnlyClassInstancesHaveFields => write!(
+                f,
+                "[line {}] Runtime error: Only class instances have fields.",
+                self.token.line
+            ),
+            InterpretErrorKind::UndefinedProperty => write!(
+                f,
+                "[line {}] Runtime error: Undefined property '{}'.",
+                self.token.line, self.token.lexeme
+            ),
         }
     }
 }
@@ -502,4 +587,7 @@ pub enum InterpretErrorKind {
     UninitializedVariable,
     InvalidCallable,
     InvalidCallableArguments,
+    OnlyClassInstancesHaveProperties,
+    UndefinedProperty,
+    OnlyClassInstancesHaveFields,
 }

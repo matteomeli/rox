@@ -5,14 +5,16 @@ use std::{
 
 use crate::{
     ast::FunctionDeclaration,
+    class::Instance,
     environment::Environment,
     interpreter::{ExecutionResult, InterpretResult, Interpreter},
+    token::{Token, TokenType},
     types::Type,
 };
 
 pub trait Callable: CallableClone {
     fn arity(&self) -> usize;
-    fn call(&self, _interpreter: &mut Interpreter, _arguments: Vec<Type>) -> InterpretResult<Type>;
+    fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Type>) -> InterpretResult<Type>;
 }
 
 pub trait CallableClone: Debug + Display {
@@ -54,22 +56,37 @@ impl Callable for Clock {
 
 impl Display for Clock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<native fn clock>")
+        write!(f, "<native fn: clock>")
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Function {
     declaration: FunctionDeclaration,
-    closure: Environment,
+    environment: Environment,
+    is_initializer: bool,
 }
 
 impl Function {
-    pub fn new(declaration: FunctionDeclaration, closure: Environment) -> Self {
+    pub fn new(
+        declaration: FunctionDeclaration,
+        environment: Environment,
+        is_initializer: bool,
+    ) -> Self {
         Function {
             declaration,
-            closure,
+            environment,
+            is_initializer,
         }
+    }
+
+    pub fn bind(&self, class_instance: &Instance) -> Self {
+        let mut environment = self.environment.child();
+        environment.define(
+            "this".to_string(),
+            Some(Type::Instance(class_instance.clone())),
+        );
+        Function::new(self.declaration.clone(), environment, self.is_initializer)
     }
 }
 
@@ -79,14 +96,29 @@ impl Callable for Function {
     }
 
     fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Type>) -> InterpretResult<Type> {
-        let mut environment = self.closure.child();
+        let mut environment = self.environment.child();
         for (token, arg) in self.declaration.params.iter().zip(arguments.iter()) {
             environment.define(token.lexeme.clone(), Some(arg.clone()));
         }
 
-        if let ExecutionResult::Return(value) =
-            interpreter.execute_block(&self.declaration.body, environment)?
-        {
+        let result = interpreter.execute_block(&self.declaration.body, environment)?;
+
+        // If initializer method, ignore result and always return `this`
+        if self.is_initializer {
+            return Ok(self
+                .environment
+                .get_at(
+                    0,
+                    &Token::new(
+                        TokenType::This,
+                        "this".to_string(),
+                        None,
+                        self.declaration.name.line,
+                    ),
+                )
+                .flatten()
+                .unwrap_or(Type::Nil));
+        } else if let ExecutionResult::Return(value) = result {
             return Ok(value);
         }
 
@@ -96,6 +128,6 @@ impl Callable for Function {
 
 impl Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<fn {}>", self.declaration.name.lexeme)
+        write!(f, "<fn: {}>", self.declaration.name.lexeme)
     }
 }
