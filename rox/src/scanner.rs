@@ -121,10 +121,10 @@ impl Scanner {
                             (Some("/"), Some("*")) => {
                                 self.advance();
                                 self.advance();
-                                opened -= 1;
+                                opened += 1;
                             }
-                            (Some("\n"), _) => {
-                                self.line -= 1;
+                            (Some("\n"), _) | (Some("\r\n"), _) => {
+                                self.line += 1;
                                 self.advance();
                             }
                             _ => {
@@ -146,9 +146,6 @@ impl Scanner {
                     self.add_token(TokenType::Slash, None)
                 }
             }
-            // TODO: Add support to Lox’s scanner for C-style /* ... */ block comments.
-            // Make sure to handle newlines in them. Consider allowing them to nest.
-            // Is adding support for nesting more work than you expected? Why?
 
             // Ignore whitespace
             " " | "\r" | "\t" => Ok(()),
