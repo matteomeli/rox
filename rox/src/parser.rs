@@ -60,6 +60,22 @@ impl Parser {
 
     fn class_declaration(&mut self) -> ParseResult<Statement> {
         let name = self.consume(TokenType::Identifier, ParseErrorKind::ExpectedClassName)?;
+
+        let super_class = if self.matches(&[TokenType::Less]) {
+            self.consume(
+                TokenType::Identifier,
+                ParseErrorKind::ExpectedsuperClassName,
+            )?;
+            Some(Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::Variable {
+                    name: self.previous(),
+                },
+            ))
+        } else {
+            None
+        };
+
         self.consume(
             TokenType::LeftBrace,
             ParseErrorKind::ExpectedLeftBraceBeforeClassBody,
@@ -75,7 +91,7 @@ impl Parser {
             ParseErrorKind::ExpectedRightBraceAfterClassBody,
         )?;
 
-        Ok(Statement::class(name, methods))
+        Ok(Statement::class(name, super_class, methods))
     }
 
     fn function(&mut self, is_method: bool) -> ParseResult<FunctionDeclaration> {
@@ -571,6 +587,19 @@ impl Parser {
             ));
         }
 
+        if self.matches(&[TokenType::Super]) {
+            let keyword = self.previous();
+            self.consume(TokenType::Dot, ParseErrorKind::ExpectedDotAfterSuper)?;
+            let method = self.consume(
+                TokenType::Identifier,
+                ParseErrorKind::ExpectedSuperClassMethodName,
+            )?;
+            return Ok(Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::superr(keyword, method),
+            ));
+        }
+
         if self.matches(&[TokenType::This]) {
             return Ok(Expression::new(
                 self.new_expression_id(),
@@ -756,9 +785,12 @@ pub enum ParseErrorKind {
     ExpectedLeftBraceBeforeMethodBody,
     ExpectedSemicolonAfterReturnValue,
     ExpectedClassName,
+    ExpectedsuperClassName,
     ExpectedLeftBraceBeforeClassBody,
     ExpectedRightBraceAfterClassBody,
     ExpectedPropertyNameAfterDot,
+    ExpectedDotAfterSuper,
+    ExpectedSuperClassMethodName,
 }
 
 impl fmt::Display for ParseErrorKind {
@@ -837,6 +869,9 @@ impl fmt::Display for ParseErrorKind {
             Self::ExpectedClassName => {
                 write!(f, "Expected class name.")
             }
+            Self::ExpectedsuperClassName => {
+                write!(f, "Expected superclass name.")
+            }
             Self::ExpectedLeftBraceBeforeClassBody => {
                 write!(f, "Expected '{{' before class body.")
             }
@@ -845,6 +880,12 @@ impl fmt::Display for ParseErrorKind {
             }
             Self::ExpectedPropertyNameAfterDot => {
                 write!(f, "Expected property name after '.'.")
+            }
+            Self::ExpectedDotAfterSuper => {
+                write!(f, "Expected '.' after 'super'.")
+            }
+            Self::ExpectedSuperClassMethodName => {
+                write!(f, "Expected superclass method name.")
             }
         }
     }

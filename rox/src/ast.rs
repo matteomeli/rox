@@ -59,6 +59,10 @@ pub enum ExpressionKind {
         name: Token,
         value: Box<Expression>,
     },
+    Super {
+        keyword: Token,
+        method: Token,
+    },
     This {
         keyword: Token,
     },
@@ -120,6 +124,10 @@ impl ExpressionKind {
         }
     }
 
+    pub fn superr(keyword: Token, method: Token) -> Self {
+        ExpressionKind::Super { keyword, method }
+    }
+
     pub fn this(keyword: Token) -> Self {
         ExpressionKind::This { keyword }
     }
@@ -147,6 +155,7 @@ pub enum Statement {
     Break,
     Class {
         name: Token,
+        super_class: Option<Expression>,
         methods: Vec<FunctionDeclaration>,
     },
     Continue,
@@ -181,8 +190,16 @@ impl Statement {
         Statement::Break
     }
 
-    pub fn class(name: Token, methods: Vec<FunctionDeclaration>) -> Self {
-        Statement::Class { name, methods }
+    pub fn class(
+        name: Token,
+        super_class: Option<Expression>,
+        methods: Vec<FunctionDeclaration>,
+    ) -> Self {
+        Statement::Class {
+            name,
+            super_class,
+            methods,
+        }
     }
 
     pub fn r#continue() -> Self {

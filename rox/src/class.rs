@@ -9,34 +9,57 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Class {
-    class_data: Rc<ClassData>,
+    class: Rc<ClassData>,
 }
 
 impl Class {
-    pub fn new(class_data: Rc<ClassData>) -> Self {
-        Class { class_data }
+    pub fn new(class: Rc<ClassData>) -> Self {
+        Class { class }
+    }
+
+    pub fn find_method(&self, name: &str) -> Option<Function> {
+        self.class.find_method(name)
+    }
+
+    pub fn as_super_class(&self) -> Rc<ClassData> {
+        self.class.clone()
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ClassData {
     name: String,
+    super_class: Option<Rc<ClassData>>,
     methods: HashMap<String, Function>,
 }
 
 impl ClassData {
-    pub fn new(name: String, methods: HashMap<String, Function>) -> Self {
-        ClassData { name, methods }
+    pub fn new(
+        name: String,
+        super_class: Option<Rc<ClassData>>,
+        methods: HashMap<String, Function>,
+    ) -> Self {
+        ClassData {
+            name,
+            super_class,
+            methods,
+        }
     }
 
     pub fn find_method(&self, name: &str) -> Option<Function> {
-        self.methods.get(name).cloned()
+        self.methods.get(name).cloned().or_else(|| {
+            if let Some(super_class) = &self.super_class {
+                super_class.find_method(name)
+            } else {
+                None
+            }
+        })
     }
 }
 
 impl Callable for Class {
     fn arity(&self) -> usize {
-        if let Some(initializer) = self.class_data.find_method("init") {
+        if let Some(initializer) = self.class.find_method("init") {
             initializer.arity()
         } else {
             0
@@ -44,8 +67,8 @@ impl Callable for Class {
     }
 
     fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Type>) -> InterpretResult<Type> {
-        let instance = Instance::new(self.class_data.clone());
-        if let Some(initializer) = self.class_data.find_method("init") {
+        let instance = Instance::new(self.class.clone());
+        if let Some(initializer) = self.class.find_method("init") {
             initializer.bind(&instance).call(interpreter, arguments)?;
         }
         Ok(Type::Instance(instance))
@@ -54,7 +77,7 @@ impl Callable for Class {
 
 impl fmt::Display for Class {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<class: {}>", self.class_data.name)
+        write!(f, "<class: {}>", self.class.name)
     }
 }
 

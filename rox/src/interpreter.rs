@@ -315,6 +315,57 @@ impl ExpressionVisitor for Interpreter {
             }
             Expression {
                 id,
+                kind: ExpressionKind::Super { keyword, method },
+            } => {
+                if let Some(distance) = self.locals.get(id) {
+                    let super_class = self
+                        .environment
+                        .get_at(*distance, keyword)
+                        .flatten()
+                        .ok_or_else(|| {
+                            InterpretError::new(
+                                keyword.clone(),
+                                InterpretErrorKind::UninitializedVariable,
+                            )
+                        })?;
+
+                    // `this` is always one level nearer than `super`'s environment.
+                    let object = self
+                        .environment
+                        .get_at(
+                            *distance - 1,
+                            &Token::new(TokenType::This, "this".to_string(), None, keyword.line),
+                        )
+                        .flatten()
+                        .ok_or_else(|| {
+                            InterpretError::new(
+                                keyword.clone(),
+                                InterpretErrorKind::UninitializedVariable,
+                            )
+                        })?;
+
+                    if let (Type::Class(super_class), Type::Instance(instance)) =
+                        (super_class, object)
+                    {
+                        return super_class
+                            .find_method(&method.lexeme)
+                            .ok_or_else(|| {
+                                InterpretError::new(
+                                    method.clone(),
+                                    InterpretErrorKind::UndefinedProperty,
+                                )
+                            })
+                            .map(|method| Type::Callable(Box::new(method.bind(&instance))));
+                    }
+                }
+
+                Err(InterpretError::new(
+                    keyword.clone(),
+                    InterpretErrorKind::UninitializedVariable,
+                ))
+            }
+            Expression {
+                id,
                 kind: ExpressionKind::This { keyword },
             } => match self.lookup_variable(keyword, *id) {
                 Some(Some(value)) => Ok(value),
@@ -364,9 +415,27 @@ impl StatementVisitor for Interpreter {
             Statement::Break => Ok(ExecutionResult::Break),
             Statement::Class {
                 name,
+                super_class,
                 methods: method_declarations,
             } => {
                 self.environment.define(name.lexeme.clone(), None);
+                let mut super_environment = self.environment.child();
+                let super_class = if let Some(super_class) = super_class {
+                    if let Type::Class(class) = self.evaluate(super_class)? {
+                        std::mem::swap(&mut self.environment, &mut super_environment);
+                        self.environment
+                            .define("super".to_string(), Some(Type::Class(class.clone())));
+                        Some(class.as_super_class())
+                    } else {
+                        return Err(InterpretError::new(
+                            name.clone(),
+                            InterpretErrorKind::SuperClassMustBeAClass,
+                        ));
+                    }
+                } else {
+                    None
+                };
+
                 let mut methods = HashMap::new();
                 for declaration in method_declarations {
                     let function = Function::new(
@@ -376,9 +445,15 @@ impl StatementVisitor for Interpreter {
                     );
                     methods.insert(declaration.name.lexeme.clone(), function);
                 }
-                let class_data = ClassData::new(name.lexeme.clone(), methods);
+
+                if super_class.is_some() {
+                    std::mem::swap(&mut self.environment, &mut super_environment);
+                }
+
+                let class_data = ClassData::new(name.lexeme.clone(), super_class, methods);
                 self.environment
                     .assign(name, Type::Class(Class::new(Rc::new(class_data))));
+
                 Ok(ExecutionResult::Success)
             }
             Statement::Continue => Ok(ExecutionResult::Continue),
@@ -571,6 +646,11 @@ impl fmt::Display for InterpretError {
                 "[line {}] Runtime error: Undefined property '{}'.",
                 self.token.line, self.token.lexeme
             ),
+            InterpretErrorKind::SuperClassMustBeAClass => write!(
+                f,
+                "[line {}] Runtime error: Superclass must be a class.",
+                self.token.line
+            ),
         }
     }
 }
@@ -590,4 +670,5 @@ pub enum InterpretErrorKind {
     OnlyClassInstancesHaveProperties,
     UndefinedProperty,
     OnlyClassInstancesHaveFields,
+    SuperClassMustBeAClass,
 }

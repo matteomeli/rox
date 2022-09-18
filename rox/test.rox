@@ -83,3 +83,46 @@ class Fizz {
 }
 var fizz = Fizz();
 print fizz.init();
+
+class Circle {
+  init(radius) {
+    this.radius = radius;
+  }
+
+  area() {
+    return 3.141592653 * this.radius * this.radius;
+  }
+}
+var circle = Circle(4);
+print circle.area(); // Prints roughly "50.2655".
+
+class Doughnut {
+  cook() {
+    print "Fry until golden brown.";
+  }
+}
+class BostonCream < Doughnut {}
+BostonCream().cook();
+
+class Doughnut {
+  cook() {
+    print "Fry until golden brown.";
+  }
+}
+class BostonCream < Doughnut {
+  cook() {
+    super.cook();
+    print "Pipe full of custard and coat with chocolate.";
+  }
+}
+BostonCream().cook();
+
+class Eclair {
+  cook() {
+    //super.cook();
+    //print "Pipe full of crème pâtissière.";
+    print "Pipe full of creme patissiere.";
+  }
+}
+
+//super.notEvenInAClass();

@@ -21,6 +21,7 @@ enum FunctionType {
 enum ClassType {
     None,
     Class,
+    Subclass,
 }
 
 pub struct Resolver<'a> {
@@ -227,6 +228,26 @@ impl<'a> ExpressionVisitor for Resolver<'a> {
                 self.resolve_local(*id, name);
                 Ok(())
             }
+            Expression {
+                id,
+                kind: ExpressionKind::Super { keyword, .. },
+            } => {
+                if self.current_class_type == ClassType::None {
+                    return Err(ResolveError::new(
+                        keyword.clone(),
+                        ResolveErrorKind::CannotUseSuperOutsideClass,
+                    ));
+                } else if self.current_class_type != ClassType::Subclass {
+                    return Err(ResolveError::new(
+                        keyword.clone(),
+                        ResolveErrorKind::CannotUseSuperWithoutSuperClass,
+                    ));
+                }
+
+                self.resolve_local(*id, keyword);
+
+                Ok(())
+            }
         }
     }
 }
@@ -242,12 +263,44 @@ impl<'a> StatementVisitor for Resolver<'a> {
                 self.end_scope();
                 Ok(())
             }
-            Statement::Class { name, methods } => {
+            Statement::Class {
+                name,
+                super_class,
+                methods,
+            } => {
                 let enclosing_class_type = self.current_class_type;
                 self.current_class_type = ClassType::Class;
 
                 self.declare(name)?;
                 self.define(name);
+
+                if let Some(Expression {
+                    kind:
+                        ExpressionKind::Variable {
+                            name: super_class_name,
+                        },
+                    ..
+                }) = &super_class
+                {
+                    if name.lexeme == super_class_name.lexeme {
+                        return Err(ResolveError::new(
+                            name.clone(),
+                            ResolveErrorKind::ClassCannotInheritFromSelf,
+                        ));
+                    }
+
+                    self.current_class_type = ClassType::Subclass;
+
+                    self.resolve_expr(unsafe { super_class.as_ref().unwrap_unchecked() })?;
+
+                    self.begin_scope();
+                    unsafe {
+                        self.scopes
+                            .last_mut()
+                            .unwrap_unchecked()
+                            .insert("super".to_string(), true);
+                    }
+                }
 
                 self.begin_scope();
                 unsafe {
@@ -267,6 +320,9 @@ impl<'a> StatementVisitor for Resolver<'a> {
                 }
 
                 self.end_scope();
+                if super_class.is_some() {
+                    self.end_scope();
+                }
 
                 self.current_class_type = enclosing_class_type;
 
@@ -372,6 +428,9 @@ pub enum ResolveErrorKind {
     CannotReturnFromTopLevelBlock,
     CannotUseThisOutsideClass,
     CannotReturnValueFromInitializer,
+    ClassCannotInheritFromSelf,
+    CannotUseSuperOutsideClass,
+    CannotUseSuperWithoutSuperClass,
 }
 
 impl fmt::Display for ResolveErrorKind {
@@ -391,6 +450,15 @@ impl fmt::Display for ResolveErrorKind {
             }
             Self::CannotReturnValueFromInitializer => {
                 write!(f, "Cannot return a value from an initializer.")
+            }
+            Self::ClassCannotInheritFromSelf => {
+                write!(f, "A class cannot inherit from itself.")
+            }
+            Self::CannotUseSuperOutsideClass => {
+                write!(f, "Cannot use 'super' outside of a class.")
+            }
+            Self::CannotUseSuperWithoutSuperClass => {
+                write!(f, "Cannot use 'super' in a class with no superclass.")
             }
         }
     }
