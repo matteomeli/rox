@@ -149,7 +149,7 @@ impl ExpressionVisitor for Interpreter {
                 if !success {
                     return Err(RuntimeError::new(
                         name.clone(),
-                        RuntimeErrorKind::UninitializedVariable,
+                        RuntimeErrorKind::UndefinedVariable,
                     ));
                 }
 
@@ -201,6 +201,14 @@ impl ExpressionVisitor for Interpreter {
                         let _ = write!(s, "{}", n);
                         Ok(Type::String(s))
                     }
+                    (Type::String(_), TokenType::EqualEqual, _)
+                    | (Type::Number(_), TokenType::EqualEqual, _) => Ok(Type::Boolean(false)),
+                    (_, TokenType::EqualEqual, Type::String(_))
+                    | (_, TokenType::EqualEqual, Type::Number(_)) => Ok(Type::Boolean(false)),
+                    (Type::String(_), TokenType::NotEqual, _)
+                    | (Type::Number(_), TokenType::NotEqual, _) => Ok(Type::Boolean(true)),
+                    (_, TokenType::NotEqual, Type::String(_))
+                    | (_, TokenType::NotEqual, Type::Number(_)) => Ok(Type::Boolean(true)),
                     (Type::Boolean(lb), op, Type::Boolean(rb)) => match op {
                         TokenType::EqualEqual => Ok(Type::Boolean(lb == rb)),
                         TokenType::NotEqual => Ok(Type::Boolean(lb != rb)),
@@ -223,6 +231,28 @@ impl ExpressionVisitor for Interpreter {
                     },
                     (Type::Nil, TokenType::EqualEqual, _) => Ok(Type::Boolean(false)),
                     (Type::Nil, TokenType::NotEqual, _) => Ok(Type::Boolean(true)),
+                    (Type::Class(a), TokenType::EqualEqual, Type::Class(b)) => {
+                        Ok(Type::Boolean(a == b))
+                    }
+                    (Type::Class(a), TokenType::NotEqual, Type::Class(b)) => {
+                        Ok(Type::Boolean(a != b))
+                    }
+                    (Type::Class(_), TokenType::EqualEqual, _)
+                    | (_, TokenType::EqualEqual, Type::Class(_)) => Ok(Type::Boolean(false)),
+                    (Type::Class(_), TokenType::NotEqual, _)
+                    | (_, TokenType::NotEqual, Type::Class(_)) => Ok(Type::Boolean(true)),
+                    (Type::Callable(_f), TokenType::EqualEqual, Type::Callable(_g)) => {
+                        // TODO: Needs Eq on Callable implementors
+                        todo!()
+                    }
+                    (Type::Callable(_f), TokenType::NotEqual, Type::Callable(_g)) => {
+                        // TODO: Needs Eq on Callable implementors
+                        todo!()
+                    }
+                    (Type::Callable(_), TokenType::EqualEqual, _)
+                    | (_, TokenType::EqualEqual, Type::Callable(_)) => Ok(Type::Boolean(false)),
+                    (Type::Callable(_), TokenType::NotEqual, _)
+                    | (_, TokenType::NotEqual, Type::Callable(_)) => Ok(Type::Boolean(true)),
                     _ => Err(RuntimeError::new(
                         operator.clone(),
                         RuntimeErrorKind::InvalidBinaryExpression,
@@ -400,7 +430,7 @@ impl ExpressionVisitor for Interpreter {
                 Some(Some(value)) => Ok(value),
                 _ => Err(RuntimeError::new(
                     name.clone(),
-                    RuntimeErrorKind::UninitializedVariable,
+                    RuntimeErrorKind::UndefinedVariable,
                 )),
             },
         }
@@ -502,7 +532,7 @@ impl StatementVisitor for Interpreter {
             Statement::Var { name, initializer } => {
                 let value = match initializer {
                     Some(expression) => Some(self.evaluate(expression)?),
-                    None => None,
+                    None => Some(Type::Nil),
                 };
                 self.environment.define(name.lexeme.clone(), value);
 

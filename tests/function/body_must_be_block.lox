@@ -1,0 +1,2 @@
+// [c line 4] Error at end: Expect '}' after block.
+fun f() 123; // expect error: Error at '123': Expected '{' before function body.

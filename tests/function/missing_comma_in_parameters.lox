@@ -1,0 +1,2 @@
+// [c line 4] Error at end: Expect '}' after block.
+fun foo(a, b c, d, e, f) {} // expect error: Error at 'c': Expected ')' after parameters.

@@ -261,7 +261,7 @@ impl Scanner {
     }
 
     fn is_alphanumeric(str: &str) -> bool {
-        str.bytes().all(|c| c.is_ascii_alphanumeric())
+        str.bytes().all(|c| c.is_ascii_alphanumeric()) || str == "_"
     }
 
     fn string(&mut self) -> ScanResult<()> {
@@ -362,7 +362,7 @@ impl Error for ScanError {}
 
 impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[line {}] Scan error: {}", self.line, self.kind)
+        write!(f, "[line {}] Error: {}", self.line, self.kind)
     }
 }
 

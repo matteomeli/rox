@@ -1,0 +1,1 @@
+1 < "1"; // expect runtime error: Invalid binary expression '<'.

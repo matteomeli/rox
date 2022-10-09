@@ -1,0 +1,1 @@
+if (true) class Foo {} // expect error: Error at 'class': Expected expression.

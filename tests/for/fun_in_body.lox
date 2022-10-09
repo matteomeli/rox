@@ -1,0 +1,1 @@
+for (;;) fun foo() {} // expect error: Error at 'fun': Expected expression.

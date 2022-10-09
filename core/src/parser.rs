@@ -117,7 +117,7 @@ impl Parser {
                 if params.len() >= 255 {
                     return Err(ParseError::new(
                         self.peek(),
-                        ParseErrorKind::TooManyFunctionArguments,
+                        ParseErrorKind::TooManyFunctionParams,
                     ));
                 }
 
@@ -731,7 +731,9 @@ impl ParseError {
     pub fn should_synchronize(&self) -> bool {
         !matches!(
             self.kind,
-            ParseErrorKind::InvalidAssignmentTarget | ParseErrorKind::TooManyFunctionArguments
+            ParseErrorKind::InvalidAssignmentTarget
+                | ParseErrorKind::TooManyFunctionArguments
+                | ParseErrorKind::TooManyFunctionParams
         )
     }
 }
@@ -745,7 +747,7 @@ impl fmt::Display for ParseError {
         } else {
             write!(
                 f,
-                "[line {}] Error at {}: {}",
+                "[line {}] Error at '{}': {}",
                 self.token.line, self.token.lexeme, self.kind
             )
         }

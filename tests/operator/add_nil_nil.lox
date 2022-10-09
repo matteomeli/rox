@@ -1,0 +1,1 @@
+nil + nil; // expect runtime error: Cannot use operator '+' for nil operands.

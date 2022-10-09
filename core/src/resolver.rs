@@ -66,7 +66,7 @@ impl<'a> Resolver<'a> {
             if scope.insert(name.lexeme.clone(), false).is_some() {
                 return Err(ResolveError::new(
                     name.clone(),
-                    ResolveErrorKind::CannotReadLocalVariableInOwnInitializer,
+                    ResolveErrorKind::VariableAlreadyPresentWithThisNameInScope,
                 ));
             } else {
                 return Ok(());
@@ -367,7 +367,7 @@ impl<'a> StatementVisitor for Resolver<'a> {
                 if self.current_function_type == FunctionType::None {
                     return Err(ResolveError::new(
                         keyword.clone(),
-                        ResolveErrorKind::CannotReadLocalVariableInOwnInitializer,
+                        ResolveErrorKind::CannotReturnFromTopLevelBlock,
                     ));
                 }
 
@@ -409,7 +409,11 @@ impl Error for ResolveError {}
 
 impl fmt::Display for ResolveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[line {}] {}", self.token.line, self.kind)
+        write!(
+            f,
+            "[line {}] Error at '{}': {}",
+            self.token.line, self.token.lexeme, self.kind
+        )
     }
 }
 

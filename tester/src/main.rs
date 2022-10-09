@@ -1,12 +1,13 @@
 use std::{
     fs::File,
-    io::{self, BufRead, Write},
+    io::{self, BufRead},
     path::Path,
     process::{exit, Command},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
+use clap::Parser;
 use console::{style, Term};
 use glob::glob;
 use regex::Regex;
@@ -30,6 +31,7 @@ struct Test {
     runtime_error_line: usize,
     expected_runtime_error: Option<String>,
     expectations: u32,
+    failures: Vec<String>,
 }
 
 impl Test {
@@ -42,15 +44,15 @@ impl Test {
             runtime_error_line: 0,
             expected_runtime_error: None,
             expectations: 0,
+            failures: Vec::new(),
         }
     }
 
     fn parse(&mut self) -> bool {
         let expected_output_pattern = Regex::new(r"// expect: ?(.*)").unwrap();
-        let expected_error_pattern = Regex::new(r"// (Error.*)").unwrap();
-        //let _error_line_pattern = Regex::new(r"// \[((java|c) )?line (\d+)\] (Error.*)").unwrap();
+        let expected_error_pattern = Regex::new(r"// expect error: (Error.*)").unwrap();
+        let _error_line_pattern = Regex::new(r"// \[((java|c) )?line (\d+)\] (Error.*)").unwrap();
         let expected_runtime_error_pattern = Regex::new(r"// expect runtime error: (.+)").unwrap();
-        let _syntax_error_pattern = Regex::new(r"\[.*line (\d+)\] (Error.+)").unwrap();
         let _stack_trace_pattern = Regex::new(r"\[line (\d+)\]").unwrap();
         let non_test_pattern = Regex::new(r"// nontest").unwrap();
 
@@ -61,16 +63,24 @@ impl Test {
                     break;
                 }
 
-                if let Some(matched) = expected_output_pattern.find(&line).map(|m| m.as_str()) {
+                if let Some(matched) = expected_output_pattern
+                    .captures(&line)
+                    .and_then(|captures| captures.get(1))
+                    .map(|matched| matched.as_str().to_string())
+                {
                     self.expected_output
-                        .push(ExpectedOuput::new(line_num, matched.to_string()));
+                        .push(ExpectedOuput::new(line_num + 1, matched));
                     self.expectations += 1;
                     continue;
                 }
 
-                if let Some(matched) = expected_error_pattern.find(&line).map(|m| m.as_str()) {
-                    self.expected_errors
-                        .push(format!("[line {}] {}", line_num + 1, matched));
+                if let Some(matched) = expected_error_pattern
+                    .captures(&line)
+                    .and_then(|captures| captures.get(1))
+                    .map(|matched| matched.as_str().to_string())
+                {
+                    let error = format!("[line {}] {}", line_num + 1, matched);
+                    self.expected_errors.push(error);
                     self.expected_exit_code = 65;
                     self.expectations += 1;
                     continue;
@@ -105,20 +115,20 @@ impl Test {
         true
     }
 
-    fn run(&mut self) -> Vec<String> {
-        let mut failures = Vec::new();
+    fn run(&mut self) -> &[String] {
+        let syntax_error_pattern = Regex::new(r"\[.*line (\d+)\] (Error.+)").unwrap();
 
         let result = Command::new("./target/release/rox-cli")
             .args([&self.path])
             .output()
             .expect("failed to execute process");
 
-        let mut error_lines = result.stderr.lines().map(|l| l.unwrap());
+        let error_lines: Vec<String> = result.stderr.lines().map(|l| l.unwrap()).collect();
         if let Some(runtime_error) = &self.expected_runtime_error {
-            // Validate runtime errors
-            let error = error_lines.next().unwrap();
-            if &error != runtime_error {
-                failures.push(format!(
+            // Validate runtime errors, can only have one
+            let error = error_lines.get(0).unwrap();
+            if error != runtime_error {
+                self.failures.push(format!(
                     "Expected runtime error '{}' and got:\n{}",
                     runtime_error, error
                 ));
@@ -141,73 +151,107 @@ impl Test {
             //   }
             // }
         } else {
-            // TODO: Compile errors
-            // var foundErrors = <String>{};
-            // var unexpectedCount = 0;
-            // for (var line in error_lines) {
-            //   var match = _syntaxErrorPattern.firstMatch(line);
-            //   if (match != null) {
-            //     var error = "[${match[1]}] ${match[2]}";
-            //     if (_expectedErrors.contains(error)) {
-            //       foundErrors.add(error);
-            //     } else {
-            //       if (unexpectedCount < 10) {
-            //         fail("Unexpected error:");
-            //         fail(line);
-            //       }
-            //       unexpectedCount++;
-            //     }
-            //   } else if (line != "") {
-            //     if (unexpectedCount < 10) {
-            //       fail("Unexpected output on stderr:");
-            //       fail(line);
-            //     }
-            //     unexpectedCount++;
-            //   }
-            // }
-            // if (unexpectedCount > 10) {
-            //   fail("(truncated ${unexpectedCount - 10} more...)");
-            // }
-            // // Validate that every expected error occurred.
-            // for (var error in _expectedErrors.difference(foundErrors)) {
-            //   fail("Missing expected error: $error");
-            // }
+            // Validate compile errors
+            let mut found_errors = Vec::new();
+            let mut unexpected_count: u32 = 0;
+            for line in &error_lines {
+                if let Some((first, second)) = syntax_error_pattern
+                    .captures(line)
+                    .and_then(|captures| {
+                        captures
+                            .get(1)
+                            .and_then(|first| captures.get(2).map(|second| (first, second)))
+                    })
+                    .map(|(first, second)| {
+                        (first.as_str().to_string(), second.as_str().to_string())
+                    })
+                {
+                    let error = format!("[line {}] {}", first, second);
+                    if self.expected_errors.contains(&error) {
+                        found_errors.push(error);
+                    } else if unexpected_count < 10 {
+                        self.failures.push("Unexpected error:".to_string());
+                        self.failures.push(line.clone());
+                        unexpected_count += 1;
+                    }
+                } else if !line.is_empty() && unexpected_count < 10 {
+                    self.failures
+                        .push("Unexpected output on stderr:".to_string());
+                    self.failures.push(line.clone());
+                    unexpected_count += 1;
+                }
+            }
+
+            if unexpected_count > 10 {
+                self.failures
+                    .push(format!("(truncated {} more...)", unexpected_count - 10));
+            }
+
+            let difference: Vec<_> = found_errors
+                .into_iter()
+                .filter(|item| !self.expected_errors.contains(item))
+                .collect();
+            for error in difference {
+                self.failures
+                    .push(format!("Missing expected error: {}", error));
+            }
         }
 
         // Validate exit code
-        //assert_eq!(result.status.code(), Some(self.expected_exit_code));
+        if result.status.code() != Some(self.expected_exit_code) && error_lines.len() > 10 {
+            let mut errors = error_lines.into_iter().take(10).collect::<Vec<_>>();
+            errors.push("(truncated...)".to_string());
+            self.failures.push(format!(
+                "Expected return code {} and got {}. Stderr:",
+                self.expected_exit_code,
+                result.status.code().unwrap()
+            ));
+            self.failures.append(&mut errors);
+        }
 
-        // TODO: Validate output
-        //let mut output_lines = result.stdout.lines().map(|l| l.unwrap());
-        // if (outputLines.isNotEmpty && outputLines.last == "") {
-        //     outputLines.removeLast();
-        //   }
-        //   var index = 0;
-        //   for (; index < outputLines.length; index++) {
-        //     var line = outputLines[index];
-        //     if (index >= _expectedOutput.length) {
-        //       fail("Got output '$line' when none was expected.");
-        //       continue;
-        //     }
-        //     var expected = _expectedOutput[index];
-        //     if (expected.output != line) {
-        //       fail("Expected output '${expected.output}' on line ${expected.line} "
-        //           " and got '$line'.");
-        //     }
-        //   }
-        //   while (index < _expectedOutput.length) {
-        //     var expected = _expectedOutput[index];
-        //     fail("Missing expected output '${expected.output}' on line "
-        //         "${expected.line}.");
-        //     index++;
-        //   }
+        // Validate output
+        let mut output_lines: Vec<String> = result.stdout.lines().map(|l| l.unwrap()).collect();
+        // Remove the trailing last empty line.
+        if let Some(output) = output_lines.last() {
+            if output.is_empty() {
+                output_lines.pop();
+            }
+        }
 
-        failures
+        let mut index = 0;
+        for (line_index, line) in output_lines.iter().enumerate() {
+            index += 1;
+            if line_index >= self.expected_output.len() {
+                self.failures
+                    .push(format!("Got output '{}' when none was expected.", line));
+                continue;
+            }
+
+            let expected = self.expected_output.get(line_index).unwrap();
+            if &expected.output != line {
+                self.failures.push(format!(
+                    "Expected output '{}' on line {} and got '{}'.",
+                    expected.output, expected.line, line
+                ));
+            }
+        }
+
+        while index < self.expected_output.len() {
+            let expected = self.expected_output.get(index).unwrap();
+            self.failures.push(format!(
+                "Missing expected output '{}' on line {}.",
+                expected.output, expected.line
+            ));
+            index += 1;
+        }
+
+        &self.failures
     }
 }
 
 struct Tester {
     filter_path: Option<String>,
+    skip: Option<Vec<String>>,
     passed: u32,
     failed: u32,
     skipped: u32,
@@ -215,9 +259,10 @@ struct Tester {
 }
 
 impl Tester {
-    fn new(filter_path: Option<String>) -> Self {
+    fn new(filter_path: Option<String>, skip: Option<Vec<String>>) -> Self {
         Tester {
             filter_path,
+            skip,
             passed: 0,
             failed: 0,
             skipped: 0,
@@ -225,11 +270,10 @@ impl Tester {
         }
     }
 
-    fn run_suite(&mut self, name: String) -> bool {
+    fn run_suite(&mut self, _name: String) -> bool {
         let term = Term::stdout();
 
-        // TODO: Run all tests
-        for path in glob("samples/**/*.lox").expect("Failed to read glob pattern") {
+        for path in glob("tests/**/*.lox").expect("Failed to read glob pattern") {
             self.run_test(&term, path.unwrap().to_str().unwrap());
         }
 
@@ -253,13 +297,23 @@ impl Tester {
     }
 
     fn run_test(&mut self, term: &Term, path: &str) {
-        if path.contains("benchmark") {
+        // Skip "benchmark" and "limit" tests
+        if path.contains("benchmark") || path.contains("limit") {
+            self.skipped += 1;
             return;
         }
 
-        // Check if we are just running a subset of the tests.
+        // Skip any other tests requested
+        if let Some(skip) = &self.skip {
+            if skip.iter().any(|t| path.contains(t)) {
+                self.skipped += 1;
+                return;
+            }
+        }
+
+        // Check if we are just running a subset of the tests
         if let Some(filter_path) = &self.filter_path {
-            let test_path: String = pathdiff::diff_paths(path, "samples")
+            let test_path: String = pathdiff::diff_paths(path, "tests")
                 .unwrap()
                 .into_os_string()
                 .into_string()
@@ -269,8 +323,7 @@ impl Tester {
             }
         }
 
-        // Fake delay to achieve nice effect on the console
-        thread::sleep(Duration::from_millis(50));
+        // Update status output
         term.clear_last_lines(1).unwrap();
         term.write_line(&format!(
             "Passed: {} Failed: {} Skipped: {} ({})",
@@ -287,25 +340,52 @@ impl Tester {
         }
         self.expectations += test.expectations;
 
+        let start = Instant::now();
         let failures = test.run();
+        let test_duration = start.elapsed();
         if failures.is_empty() {
             self.passed += 1;
         } else {
             self.failed += 1;
             println!("{}: {}", style("FAIL").red(), path);
             println!();
-            for failure in &failures {
+            for failure in failures {
                 println!("\t{}", style(failure).blue());
             }
             println!();
         }
+
+        // Fake delay to achieve nice effect on the console
+        thread::sleep(Duration::from_millis(
+            (100u128
+                .checked_sub(test_duration.as_millis())
+                .unwrap_or(100))
+            .try_into()
+            .unwrap(),
+        ));
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Optional path to filter tests
+    #[arg(short, long)]
+    filter_path: Option<String>,
+
+    /// Optional tests to skip, seprated by comma
+    #[arg(short, long)]
+    skip: Option<String>,
+}
+
 fn main() -> io::Result<()> {
-    //let mut tester = Tester::new(Some("constructor/default_arguments.lox".to_string()));
-    let mut tester = Tester::new(Some("constructor".to_string()));
-    if !tester.run_suite("test".to_string()) {
+    let args = Args::parse();
+    let mut tester = Tester::new(
+        args.filter_path,
+        args.skip
+            .map(|skip| skip.split(',').map(str::to_string).collect()),
+    );
+    if !tester.run_suite("all".to_string()) {
         exit(1);
     }
 

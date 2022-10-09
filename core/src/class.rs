@@ -57,6 +57,14 @@ impl ClassData {
     }
 }
 
+impl PartialEq for Class {
+    fn eq(&self, other: &Self) -> bool {
+        self.class.name == other.class.name
+    }
+}
+
+impl Eq for Class {}
+
 impl Callable for Class {
     fn arity(&self) -> usize {
         if let Some(initializer) = self.class.find_method("init") {

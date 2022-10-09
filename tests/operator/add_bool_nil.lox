@@ -1,0 +1,1 @@
+true + nil; // expect runtime error: Invalid binary expression '+'.
