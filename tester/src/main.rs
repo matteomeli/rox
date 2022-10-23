@@ -126,12 +126,13 @@ impl Test {
         let error_lines: Vec<String> = result.stderr.lines().map(|l| l.unwrap()).collect();
         if let Some(runtime_error) = &self.expected_runtime_error {
             // Validate runtime errors, can only have one
-            let error = error_lines.get(0).unwrap();
-            if error != runtime_error {
-                self.failures.push(format!(
-                    "Expected runtime error '{}' and got:\n{}",
-                    runtime_error, error
-                ));
+            if let Some(error) = error_lines.get(0) {
+                if error != runtime_error {
+                    self.failures.push(format!(
+                        "Expected runtime error '{}' and got:\n{}",
+                        runtime_error, error
+                    ));
+                }
             }
 
             // TODO: Make sure the stack trace has the right line.

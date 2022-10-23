@@ -168,6 +168,7 @@ impl ExpressionVisitor for Interpreter {
                 let right = self.evaluate(right)?;
 
                 match (left, operator.token_type, right) {
+                    (_, TokenType::Comma, r) => Ok(r),
                     (Type::Number(ln), op, Type::Number(rn)) => match op {
                         TokenType::Plus => Ok(Type::Number(ln + rn)),
                         TokenType::Minus => Ok(Type::Number(ln - rn)),
@@ -179,10 +180,11 @@ impl ExpressionVisitor for Interpreter {
                         TokenType::LessEqual => Ok(Type::Boolean(ln <= rn)),
                         TokenType::EqualEqual => Ok(Type::Boolean(ln == rn)),
                         TokenType::NotEqual => Ok(Type::Boolean(ln != rn)),
-                        _ => Err(RuntimeError::new(
-                            operator.clone(),
-                            RuntimeErrorKind::InvalidOperandsForBinaryOpeator,
-                        )),
+                        _ => Ok(Type::Nil)
+                        // _ => Err(RuntimeError::new(
+                        //     operator.clone(),
+                        //     RuntimeErrorKind::InvalidOperandsForBinaryOpeator,
+                        // )),
                     },
                     (Type::String(mut ls), op, Type::String(rs)) => match op {
                         TokenType::EqualEqual => Ok(Type::Boolean(ls == rs)),
@@ -253,10 +255,11 @@ impl ExpressionVisitor for Interpreter {
                     | (_, TokenType::EqualEqual, Type::Callable(_)) => Ok(Type::Boolean(false)),
                     (Type::Callable(_), TokenType::NotEqual, _)
                     | (_, TokenType::NotEqual, Type::Callable(_)) => Ok(Type::Boolean(true)),
-                    _ => Err(RuntimeError::new(
-                        operator.clone(),
-                        RuntimeErrorKind::InvalidBinaryExpression,
-                    )),
+                    _ => Ok(Type::Nil)
+                    // _ => Err(RuntimeError::new(
+                    //     operator.clone(),
+                    //     RuntimeErrorKind::InvalidBinaryExpression,
+                    // )),
                 }
             }
             Expression {

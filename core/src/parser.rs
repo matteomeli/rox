@@ -364,7 +364,22 @@ impl Parser {
     }
 
     fn expression(&mut self) -> ParseResult<Expression> {
-        self.assignment()
+        self.comma()
+    }
+
+    fn comma(&mut self) -> ParseResult<Expression> {
+        let mut expression = self.assignment()?;
+
+        while self.matches(&[TokenType::Comma]) {
+            let operator = self.previous();
+            let right = self.assignment()?;
+            expression = Expression::new(
+                self.new_expression_id(),
+                ExpressionKind::binary(Box::new(expression), operator, Box::new(right)),
+            );
+        }
+
+        Ok(expression)
     }
 
     fn assignment(&mut self) -> ParseResult<Expression> {
@@ -400,52 +415,52 @@ impl Parser {
     }
 
     fn or(&mut self) -> ParseResult<Expression> {
-        let mut left = self.and()?;
+        let mut expression = self.and()?;
 
         while self.matches(&[TokenType::Or]) {
             let operator = self.previous();
             let right = self.and()?;
-            left = Expression::new(
+            expression = Expression::new(
                 self.new_expression_id(),
-                ExpressionKind::logical(Box::new(left), operator, Box::new(right)),
+                ExpressionKind::logical(Box::new(expression), operator, Box::new(right)),
             );
         }
 
-        Ok(left)
+        Ok(expression)
     }
 
     fn and(&mut self) -> ParseResult<Expression> {
-        let mut left = self.equality()?;
+        let mut expression = self.equality()?;
 
         while self.matches(&[TokenType::And]) {
             let operator = self.previous();
             let right = self.equality()?;
-            left = Expression::new(
+            expression = Expression::new(
                 self.new_expression_id(),
-                ExpressionKind::logical(Box::new(left), operator, Box::new(right)),
+                ExpressionKind::logical(Box::new(expression), operator, Box::new(right)),
             );
         }
 
-        Ok(left)
+        Ok(expression)
     }
 
     fn equality(&mut self) -> ParseResult<Expression> {
-        let mut left = self.comparison()?;
+        let mut expression = self.comparison()?;
 
         while self.matches(&[TokenType::NotEqual, TokenType::EqualEqual]) {
             let operator = self.previous();
             let right = self.comparison()?;
-            left = Expression::new(
+            expression = Expression::new(
                 self.new_expression_id(),
-                ExpressionKind::binary(Box::new(left), operator, Box::new(right)),
+                ExpressionKind::binary(Box::new(expression), operator, Box::new(right)),
             );
         }
 
-        Ok(left)
+        Ok(expression)
     }
 
     fn comparison(&mut self) -> ParseResult<Expression> {
-        let mut left = self.term()?;
+        let mut expression = self.term()?;
 
         while self.matches(&[
             TokenType::Greater,
@@ -455,43 +470,43 @@ impl Parser {
         ]) {
             let operator = self.previous();
             let right = self.term()?;
-            left = Expression::new(
+            expression = Expression::new(
                 self.new_expression_id(),
-                ExpressionKind::binary(Box::new(left), operator, Box::new(right)),
+                ExpressionKind::binary(Box::new(expression), operator, Box::new(right)),
             );
         }
 
-        Ok(left)
+        Ok(expression)
     }
 
     fn term(&mut self) -> ParseResult<Expression> {
-        let mut left = self.factor()?;
+        let mut expression = self.factor()?;
 
         while self.matches(&[TokenType::Minus, TokenType::Plus]) {
             let operator = self.previous();
             let right = self.factor()?;
-            left = Expression::new(
+            expression = Expression::new(
                 self.new_expression_id(),
-                ExpressionKind::binary(Box::new(left), operator, Box::new(right)),
+                ExpressionKind::binary(Box::new(expression), operator, Box::new(right)),
             );
         }
 
-        Ok(left)
+        Ok(expression)
     }
 
     fn factor(&mut self) -> ParseResult<Expression> {
-        let mut left = self.unary()?;
+        let mut expression = self.unary()?;
 
         while self.matches(&[TokenType::Slash, TokenType::Star]) {
             let operator = self.previous();
             let right = self.unary()?;
-            left = Expression::new(
+            expression = Expression::new(
                 self.new_expression_id(),
-                ExpressionKind::binary(Box::new(left), operator, Box::new(right)),
+                ExpressionKind::binary(Box::new(expression), operator, Box::new(right)),
             );
         }
 
-        Ok(left)
+        Ok(expression)
     }
 
     fn unary(&mut self) -> ParseResult<Expression> {
@@ -540,7 +555,7 @@ impl Parser {
                         ParseErrorKind::TooManyFunctionArguments,
                     ));
                 }
-                arguments.push(self.expression()?);
+                arguments.push(self.assignment()?);
                 if !self.matches(&[TokenType::Comma]) {
                     break;
                 }
