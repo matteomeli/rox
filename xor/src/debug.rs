@@ -1,7 +1,7 @@
 use crate::chunk::{Chunk, OpCode};
 use std::convert::TryFrom;
 
-fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
+pub(crate) fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
     print!("{:04} ", offset);
     let line = chunk
         .get_line(offset)
@@ -24,6 +24,11 @@ fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
             OpCode::Return => simple_instruction("RETURN", offset),
             OpCode::Constant => constant_instruction("CONSTANT", chunk, offset),
             OpCode::ConstantLong => constant_long_instruction("CONSTANT_LONG", chunk, offset),
+            OpCode::Negate => simple_instruction("NEGATE", offset),
+            OpCode::Add => simple_instruction("ADD", offset),
+            OpCode::Subtract => simple_instruction("SUBTRACT", offset),
+            OpCode::Multiply => simple_instruction("MULTIPLY", offset),
+            OpCode::Divide => simple_instruction("DIVIDE", offset),
         },
         Err(_) => {
             println!("Unknown opcode {}", byte);

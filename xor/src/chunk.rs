@@ -5,9 +5,14 @@ use crate::value::Value;
 #[derive(IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum OpCode {
+    Return,
     Constant,
     ConstantLong,
-    Return,
+    Negate,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
 }
 
 pub struct LineStart {
