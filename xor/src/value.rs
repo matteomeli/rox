@@ -16,6 +16,7 @@ impl From<f64> for Value {
 impl TryFrom<Value> for f64 {
     type Error = VMError;
 
+    #[allow(unreachable_patterns)]
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
             Value::Number(n) => Ok(n),

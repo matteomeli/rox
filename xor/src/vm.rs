@@ -58,9 +58,10 @@ impl VM {
     pub fn run(&mut self, chunk: &Chunk) -> InterpretResult {
         macro_rules! binary_op {
             ($op:tt) => {{
+                // TODO: Optimise like NEGATE, removing one pop and apply the operation in place
                 let b: f64 = self.pop_stack()?.try_into()?;
                 let a: f64 = self.pop_stack()?.try_into()?;
-                self.push_stack((a $op b).into());
+                self.stack.push((a $op b).into());
             }};
         }
 
@@ -95,15 +96,21 @@ impl VM {
                     }
                     OpCode::Constant => {
                         let constant = self.read_constant(chunk);
-                        self.push_stack(constant);
+                        self.stack.push(constant);
                     }
                     OpCode::ConstantLong => {
                         let constant = self.read_constant_long(chunk);
-                        self.push_stack(constant);
+                        self.stack.push(constant);
                     }
                     OpCode::Negate => {
-                        let n: f64 = self.pop_stack()?.try_into()?;
-                        self.push_stack((-n).into());
+                        //let n: f64 = self.pop_stack()?.try_into()?;
+                        //self.stack.push((-n).into());
+                        // Negate the value in place without popping/pushing the values stack
+                        let value = self
+                            .stack
+                            .last_mut()
+                            .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
+                        *value = Value::Number(-value.clone().try_into()?);
                     }
                     OpCode::Add => binary_op!(+),
                     OpCode::Subtract => binary_op!(-),
@@ -113,10 +120,6 @@ impl VM {
                 Err(_) => return rt(RuntimeError::UnknownOpCode),
             }
         }
-    }
-
-    fn push_stack(&mut self, value: Value) {
-        self.stack.push(value);
     }
 
     fn pop_stack(&mut self) -> ValueResult {
