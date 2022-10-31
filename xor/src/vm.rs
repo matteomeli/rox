@@ -2,6 +2,7 @@ use std::fmt;
 
 use crate::{
     chunk::{Chunk, OpCode},
+    compiler,
     value::Value,
 };
 
@@ -54,8 +55,13 @@ pub struct VM {
 }
 
 impl VM {
+    pub fn interpret(&mut self, source: &str) -> InterpretResult {
+        compiler::compile(source);
+        Ok(())
+    }
+
     #[allow(clippy::single_match)]
-    pub fn run(&mut self, chunk: &Chunk) -> InterpretResult {
+    fn run(&mut self, chunk: &Chunk) -> InterpretResult {
         macro_rules! binary_op {
             ($op:tt) => {{
                 // TODO: Optimise like NEGATE, removing one pop and apply the operation in place
