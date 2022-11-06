@@ -1,6 +1,8 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
-use crate::value::Value;
+use crate::{value::Value, vm::CompileError};
+
+pub const U24_MAX: u32 = (1_u32 << 24) - 1;
 
 #[derive(IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
@@ -42,26 +44,30 @@ impl Chunk {
         }
     }
 
-    pub fn write_constant(&mut self, value: Value, line: u32) {
-        let index = self.add_constant(value);
+    pub fn write_constant(&mut self, value: Value, line: u32) -> Result<(), CompileError> {
+        let constant = self.add_constant(value)?;
         if self.constants.len() < (u8::MAX as usize) {
             self.write(OpCode::Constant.into(), line);
-            self.write(index as u8, line);
+            self.write(constant as u8, line);
         } else {
             // Store "long" constant index with 24 bit operand
             self.write(OpCode::ConstantLong.into(), line);
             // Convert to "u24" from usize with little-endian ordering
-            let [a, b, c, ..] = index.to_le_bytes();
+            let [a, b, c, ..] = constant.to_le_bytes();
             self.write(a, line);
             self.write(b, line);
             self.write(c, line);
-            // TODO: Handle index > u24::MAX
         }
+
+        Ok(())
     }
 
-    pub fn add_constant(&mut self, value: Value) -> usize {
+    pub fn add_constant(&mut self, value: Value) -> Result<usize, CompileError> {
+        if self.constants.len() > (U24_MAX as usize) {
+            return Err(CompileError::TooManyConstants);
+        }
         self.constants.push(value);
-        self.constants.len() - 1
+        Ok(self.constants.len() - 1)
     }
 
     // TODO: This is very expensive as it has to walk the whole array of line starts every time

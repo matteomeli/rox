@@ -35,7 +35,7 @@ fn run_file(vm: &mut VM, path: &str) {
     });
     let exit_code = match vm.interpret(&source) {
         Ok(()) => 0,
-        Err(VMError::CompileError) => 65,
+        Err(VMError::CompileError(_)) => 65,
         Err(VMError::RuntimeError(_)) => 70,
     };
     std::process::exit(exit_code);

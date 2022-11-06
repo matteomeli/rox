@@ -26,16 +26,31 @@ impl fmt::Display for RuntimeError {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum CompileError {
+    ParseError,
+    TooManyConstants,
+}
+
+impl fmt::Display for CompileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ParseError => write!(f, "Parse error."),
+            Self::TooManyConstants => write!(f, "Too many constants in one chunk."),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum VMError {
-    CompileError,
+    CompileError(CompileError),
     RuntimeError(RuntimeError),
 }
 
 impl fmt::Display for VMError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::CompileError => write!(f, "Compiler error."),
+            Self::CompileError(ce) => write!(f, "{}", ce),
             Self::RuntimeError(re) => write!(f, "{}", re),
         }
     }
@@ -56,8 +71,8 @@ pub struct VM {
 
 impl VM {
     pub fn interpret(&mut self, source: &str) -> InterpretResult {
-        compiler::compile(source);
-        Ok(())
+        let chunk = compiler::compile(source).map_err(VMError::CompileError)?;
+        self.run(&chunk)
     }
 
     #[allow(clippy::single_match)]
@@ -75,6 +90,8 @@ impl VM {
         {
             println!("Execution trace:");
         }
+
+        self.ip = 0;
 
         loop {
             #[cfg(feature = "trace")]

@@ -1,6 +1,6 @@
 use std::{iter::Peekable, str::CharIndices};
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TokenType {
     // Single character tokens
     LeftParen,
@@ -58,16 +58,26 @@ pub enum TokenType {
     Eof,
 }
 
+impl TokenType {
+    pub fn error_message(token_type: TokenType) -> Option<&'static str> {
+        match token_type {
+            TokenType::UnexpectedCharacterError => Some("Unexpected character."),
+            TokenType::UnterminatedStringError => Some("Unterminated string."),
+            _ => None,
+        }
+    }
+}
+
 pub struct Token<'a> {
-    pub ttype: TokenType,
-    pub lexeme: Option<&'a str>,
-    pub line: u32,
+    pub(crate) token_type: TokenType,
+    pub(crate) lexeme: Option<&'a str>,
+    pub(crate) line: u32,
 }
 
 impl<'a> Token<'a> {
-    pub fn new(ttype: TokenType, lexeme: Option<&'a str>, line: u32) -> Self {
+    pub fn new(token_type: TokenType, lexeme: Option<&'a str>, line: u32) -> Self {
         Token {
-            ttype,
+            token_type,
             lexeme,
             line,
         }
