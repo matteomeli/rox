@@ -318,8 +318,8 @@ impl<'a> Scanner<'a> {
             self.advance();
         }
 
-        let token_tyoe = self.identifier_type();
-        self.make_token(token_tyoe)
+        let token_type = self.identifier_type();
+        self.make_token(token_type)
     }
 
     fn identifier_type(&mut self) -> TokenType {

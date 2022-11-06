@@ -12,7 +12,7 @@ use crate::debug;
 #[derive(Debug, Clone)]
 pub enum RuntimeError {
     StackUnderflow,
-    TypeError(&'static str, String),
+    TypeError(&'static str, String, bool),
     UnknownOpCode,
 }
 
@@ -20,7 +20,21 @@ impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::StackUnderflow => write!(f, "Stack underflow."),
-            Self::TypeError(t, v) => write!(f, "Expected a {} value but found {}.", t, v),
+            #[allow(unused_variables)]
+            Self::TypeError(expected, actual, is_plural) => {
+                #[cfg(not(feature = "lox_errors"))]
+                {
+                    write!(f, "Expected a {} value but found {}.", t, v)
+                }
+                #[cfg(feature = "lox_errors")]
+                {
+                    if *is_plural {
+                        write!(f, "Operands must be a {}s.", expected)
+                    } else {
+                        write!(f, "Operand must be a {}.", expected)
+                    }
+                }
+            }
             Self::UnknownOpCode => write!(f, "Unknonw opcode."),
         }
     }
@@ -72,7 +86,18 @@ pub struct VM {
 impl VM {
     pub fn interpret(&mut self, source: &str) -> InterpretResult {
         let chunk = compiler::compile(source).map_err(VMError::CompileError)?;
-        self.run(&chunk)
+        let result = self.run(&chunk);
+        if let Err(VMError::RuntimeError(ref e)) = result {
+            eprintln!("{}", e);
+            if let Some(n) = chunk.get_line(self.ip - 1) {
+                eprint!("[line {}] in ", n);
+            } else {
+                eprint!("[unknown line] in ");
+            }
+            eprintln!("script");
+            self.stack.clear();
+        }
+        result
     }
 
     #[allow(clippy::single_match)]
@@ -125,15 +150,47 @@ impl VM {
                         let constant = self.read_constant_long(chunk);
                         self.stack.push(constant);
                     }
+                    OpCode::Nil => self.stack.push(Value::Nil),
+                    OpCode::True => self.stack.push(Value::Bool(true)),
+                    OpCode::False => self.stack.push(Value::Bool(false)),
+                    OpCode::Not => {
+                        // TODO: Optimise like NEGATE, removing one pop and apply the operation in place
+                        let b = self.pop_stack()?.is_falsey();
+                        self.stack.push(Value::Bool(b));
+                    }
+                    OpCode::Equal => {
+                        let a = self.pop_stack()?;
+                        let b = self.pop_stack()?;
+                        self.stack.push((a == b).into())
+                    }
+                    OpCode::Greater => binary_op!(>),
+                    OpCode::Less => binary_op!(<),
                     OpCode::Negate => {
-                        //let n: f64 = self.pop_stack()?.try_into()?;
-                        //self.stack.push((-n).into());
                         // Negate the value in place without popping/pushing the values stack
                         let value = self
                             .stack
                             .last_mut()
                             .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
-                        *value = Value::Number(-value.clone().try_into()?);
+                        #[cfg(not(feature = "lox_errors"))]
+                        {
+                            let n: f64 = -value.clone().try_into()?;
+                            *value = Value::Number(n);
+                        }
+
+                        #[cfg(feature = "lox_errors")]
+                        {
+                            let n: f64 = value.clone().try_into().map_err(|vme| match vme {
+                                VMError::RuntimeError(RuntimeError::TypeError(
+                                    expected,
+                                    actual,
+                                    true,
+                                )) => VMError::RuntimeError(RuntimeError::TypeError(
+                                    expected, actual, false,
+                                )),
+                                _ => vme,
+                            })?;
+                            *value = Value::Number(-n);
+                        }
                     }
                     OpCode::Add => binary_op!(+),
                     OpCode::Subtract => binary_op!(-),
@@ -143,6 +200,11 @@ impl VM {
                 Err(_) => return rt(RuntimeError::UnknownOpCode),
             }
         }
+    }
+
+    fn peek_stack(&self, distance: usize) -> Value {
+        // TODO: Handle possible index out of bounds access here
+        self.stack[self.stack.len() - 1 - distance].clone()
     }
 
     fn pop_stack(&mut self) -> ValueResult {

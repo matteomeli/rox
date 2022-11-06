@@ -61,14 +61,41 @@ impl ParseRule {
                 precedence: Precedence::Factor,
                 ..ParseRule::default()
             },
-            TokenType::Bang => ParseRule::default(),
-            TokenType::BangEqual => ParseRule::default(),
+            TokenType::Bang => ParseRule {
+                prefix: Some(unary),
+                ..ParseRule::default()
+            },
+            TokenType::BangEqual => ParseRule {
+                infix: Some(binary),
+                precedence: Precedence::Equality,
+                ..ParseRule::default()
+            },
             TokenType::Equal => ParseRule::default(),
-            TokenType::EqualEqual => ParseRule::default(),
-            TokenType::Greater => ParseRule::default(),
-            TokenType::GreaterEqual => ParseRule::default(),
-            TokenType::Less => ParseRule::default(),
-            TokenType::LessEqual => ParseRule::default(),
+            TokenType::EqualEqual => ParseRule {
+                infix: Some(binary),
+                precedence: Precedence::Equality,
+                ..ParseRule::default()
+            },
+            TokenType::Greater => ParseRule {
+                infix: Some(binary),
+                precedence: Precedence::Comparison,
+                ..ParseRule::default()
+            },
+            TokenType::GreaterEqual => ParseRule {
+                infix: Some(binary),
+                precedence: Precedence::Comparison,
+                ..ParseRule::default()
+            },
+            TokenType::Less => ParseRule {
+                infix: Some(binary),
+                precedence: Precedence::Comparison,
+                ..ParseRule::default()
+            },
+            TokenType::LessEqual => ParseRule {
+                infix: Some(binary),
+                precedence: Precedence::Comparison,
+                ..ParseRule::default()
+            },
             TokenType::Identifier => ParseRule::default(),
             TokenType::String => ParseRule::default(),
             TokenType::Number => ParseRule {
@@ -78,17 +105,26 @@ impl ParseRule {
             TokenType::And => ParseRule::default(),
             TokenType::Class => ParseRule::default(),
             TokenType::Else => ParseRule::default(),
-            TokenType::False => ParseRule::default(),
+            TokenType::False => ParseRule {
+                prefix: Some(literal),
+                ..Default::default()
+            },
             TokenType::For => ParseRule::default(),
             TokenType::Fun => ParseRule::default(),
             TokenType::If => ParseRule::default(),
-            TokenType::Nil => ParseRule::default(),
+            TokenType::Nil => ParseRule {
+                prefix: Some(literal),
+                ..Default::default()
+            },
             TokenType::Or => ParseRule::default(),
             TokenType::Print => ParseRule::default(),
             TokenType::Return => ParseRule::default(),
             TokenType::Super => ParseRule::default(),
             TokenType::This => ParseRule::default(),
-            TokenType::True => ParseRule::default(),
+            TokenType::True => ParseRule {
+                prefix: Some(literal),
+                ..Default::default()
+            },
             TokenType::Var => ParseRule::default(),
             TokenType::While => ParseRule::default(),
             TokenType::Break => ParseRule::default(),
@@ -109,7 +145,7 @@ pub fn get_rule(token_type: TokenType) -> ParseRule {
     token_type.into()
 }
 
-pub fn number(compiler: &mut Compiler) {
+fn number(compiler: &mut Compiler) {
     let n: f64 = compiler
         .previous
         .as_ref()
@@ -122,12 +158,12 @@ pub fn number(compiler: &mut Compiler) {
     compiler.emit_constant(n.into());
 }
 
-pub fn grouping(compiler: &mut Compiler) {
+fn grouping(compiler: &mut Compiler) {
     compiler.expression();
     compiler.consume(TokenType::RightParen, "Expect ')' after expression.");
 }
 
-pub fn unary(compiler: &mut Compiler) {
+fn unary(compiler: &mut Compiler) {
     let operator = compiler.previous.as_ref().unwrap();
     let token_type = operator.token_type;
     let line = operator.line; // Store the line now so it's not affected by the operand
@@ -138,11 +174,12 @@ pub fn unary(compiler: &mut Compiler) {
     // Compile negate opcode
     match token_type {
         TokenType::Minus => compiler.emit_byte_with_line(OpCode::Negate.into(), line),
+        TokenType::Bang => compiler.emit_byte_with_line(OpCode::Not.into(), line),
         _ => unreachable!(),
     }
 }
 
-pub fn binary(compiler: &mut Compiler) {
+fn binary(compiler: &mut Compiler) {
     let operator = compiler.previous.as_ref().unwrap();
     let token_type = operator.token_type;
 
@@ -152,10 +189,25 @@ pub fn binary(compiler: &mut Compiler) {
     compiler.parse_precedence(Precedence::try_from(precedence + 1).unwrap());
 
     match token_type {
+        TokenType::BangEqual => compiler.emit_bytes(OpCode::Equal.into(), OpCode::Not.into()),
+        TokenType::EqualEqual => compiler.emit_byte(OpCode::Equal.into()),
+        TokenType::Greater => compiler.emit_byte(OpCode::Greater.into()),
+        TokenType::GreaterEqual => compiler.emit_bytes(OpCode::Greater.into(), OpCode::Not.into()),
+        TokenType::Less => compiler.emit_byte(OpCode::Less.into()),
+        TokenType::LessEqual => compiler.emit_bytes(OpCode::Less.into(), OpCode::Not.into()),
         TokenType::Plus => compiler.emit_byte(OpCode::Add.into()),
         TokenType::Minus => compiler.emit_byte(OpCode::Subtract.into()),
         TokenType::Star => compiler.emit_byte(OpCode::Multiply.into()),
         TokenType::Slash => compiler.emit_byte(OpCode::Divide.into()),
+        _ => unreachable!(),
+    }
+}
+
+fn literal(compiler: &mut Compiler) {
+    match compiler.previous.as_ref().unwrap().token_type {
+        TokenType::False => compiler.emit_byte(OpCode::False.into()),
+        TokenType::Nil => compiler.emit_byte(OpCode::Nil.into()),
+        TokenType::True => compiler.emit_byte(OpCode::True.into()),
         _ => unreachable!(),
     }
 }
