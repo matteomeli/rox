@@ -13,3 +13,4 @@ lox_errors = []
 
 [dependencies]
 num_enum = "0.5.7"
+fnv = "1.0.7"

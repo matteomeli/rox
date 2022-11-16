@@ -1,9 +1,11 @@
 use std::fmt;
 
+use fnv::FnvHashSet;
+
 use crate::{
     chunk::{Chunk, OpCode},
     compiler,
-    value::Value,
+    value::{create_string, InternedString, ObjRoot, Value},
 };
 
 #[cfg(feature = "trace")]
@@ -14,13 +16,14 @@ pub enum RuntimeError {
     StackUnderflow,
     TypeError(&'static str, String, bool),
     UnknownOpCode,
+    InvalidAddition(String, String),
 }
 
 impl fmt::Display for RuntimeError {
+    #[allow(unused_variables)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::StackUnderflow => write!(f, "Stack underflow."),
-            #[allow(unused_variables)]
             Self::TypeError(expected, actual, is_plural) => {
                 #[cfg(not(feature = "lox_errors"))]
                 {
@@ -29,13 +32,23 @@ impl fmt::Display for RuntimeError {
                 #[cfg(feature = "lox_errors")]
                 {
                     if *is_plural {
-                        write!(f, "Operands must be a {}s.", expected)
+                        write!(f, "Operands must be {}s.", expected)
                     } else {
                         write!(f, "Operand must be a {}.", expected)
                     }
                 }
             }
             Self::UnknownOpCode => write!(f, "Unknonw opcode."),
+            Self::InvalidAddition(op1, op2) => {
+                #[cfg(not(feature = "lox_errors"))]
+                {
+                    write!(f, "Invalid types for operator +: {}, {}.", op1, op2)
+                }
+                #[cfg(feature = "lox_errors")]
+                {
+                    write!(f, "Operands must be two numbers or two strings.")
+                }
+            }
         }
     }
 }
@@ -81,11 +94,12 @@ fn rt(re: RuntimeError) -> InterpretResult {
 pub struct VM {
     ip: usize,
     stack: Vec<Value>,
+    pub strings: FnvHashSet<InternedString>,
 }
 
 impl VM {
     pub fn interpret(&mut self, source: &str) -> InterpretResult {
-        let chunk = compiler::compile(source).map_err(VMError::CompileError)?;
+        let chunk = compiler::compile(self, source).map_err(VMError::CompileError)?;
         let result = self.run(&chunk);
         if let Err(VMError::RuntimeError(ref e)) = result {
             eprintln!("{}", e);
@@ -192,7 +206,25 @@ impl VM {
                             *value = Value::Number(-n);
                         }
                     }
-                    OpCode::Add => binary_op!(+),
+                    OpCode::Add => {
+                        let b = self.pop_stack()?;
+                        let a = self.pop_stack()?;
+                        match (&b, &a) {
+                            (Value::Number(b), Value::Number(a)) => self.stack.push((a + b).into()),
+                            (Value::String(b), Value::String(a)) => {
+                                let a = &a.upgrade().unwrap().content;
+                                let b = &b.upgrade().unwrap().content;
+                                let s = create_string(self, &format!("{}{}", a, b));
+                                self.stack.push(s.into())
+                            }
+                            _ => {
+                                return rt(RuntimeError::InvalidAddition(
+                                    a.to_string(),
+                                    b.to_string(),
+                                ))
+                            }
+                        }
+                    }
                     OpCode::Subtract => binary_op!(-),
                     OpCode::Multiply => binary_op!(*),
                     OpCode::Divide => binary_op!(/),

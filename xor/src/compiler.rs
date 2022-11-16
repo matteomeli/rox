@@ -4,12 +4,13 @@ use crate::{
     parser::{get_rule, Precedence},
     scanner::{Scanner, Token, TokenType},
     value::Value,
-    vm::CompileError,
+    vm::{CompileError, VM},
 };
 
 type CompilerResult = Result<Chunk, CompileError>;
 
-pub struct Compiler<'src> {
+pub struct Compiler<'src, 'vm> {
+    pub vm: &'vm mut VM,
     scanner: Scanner<'src>,
     pub(crate) previous: Option<Token<'src>>,
     current: Option<Token<'src>>,
@@ -18,9 +19,10 @@ pub struct Compiler<'src> {
     chunk: Chunk,
 }
 
-impl<'src> Compiler<'src> {
-    pub fn new(scanner: Scanner<'src>) -> Self {
+impl<'src, 'vm> Compiler<'src, 'vm> {
+    pub fn new(vm: &'vm mut VM, scanner: Scanner<'src>) -> Self {
         Compiler {
+            vm,
             scanner,
             previous: None,
             current: None,
@@ -155,9 +157,9 @@ fn report_error(message: &str, token: &Token) {
     eprintln!(": {}", message);
 }
 
-pub(crate) fn compile(source: &str) -> CompilerResult {
+pub(crate) fn compile(vm: &mut VM, source: &str) -> CompilerResult {
     let scanner = Scanner::new(source);
-    let mut compiler = Compiler::new(scanner);
+    let mut compiler = Compiler::new(vm, scanner);
     compiler.advance();
     compiler.expression();
     compiler.consume(TokenType::Eof, "Expected end of expression.");

@@ -1,6 +1,6 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
-use crate::{chunk::OpCode, compiler::Compiler, scanner::TokenType};
+use crate::{chunk::OpCode, compiler::Compiler, scanner::TokenType, value::create_string};
 
 #[derive(Default, IntoPrimitive, TryFromPrimitive, PartialEq, Eq, PartialOrd)]
 #[repr(u8)]
@@ -97,7 +97,10 @@ impl ParseRule {
                 ..ParseRule::default()
             },
             TokenType::Identifier => ParseRule::default(),
-            TokenType::String => ParseRule::default(),
+            TokenType::String => ParseRule {
+                prefix: Some(string),
+                ..ParseRule::default()
+            },
             TokenType::Number => ParseRule {
                 prefix: Some(number),
                 ..ParseRule::default()
@@ -210,4 +213,13 @@ fn literal(compiler: &mut Compiler) {
         TokenType::True => compiler.emit_byte(OpCode::True.into()),
         _ => unreachable!(),
     }
+}
+
+fn string(compiler: &mut Compiler) {
+    let vm = &mut compiler.vm;
+    let quoted_content = compiler.previous.as_ref().unwrap().lexeme.unwrap();
+    // Remove string quotaion marks from lexeme
+    let content = &quoted_content[1..quoted_content.len() - 1];
+    let s = create_string(vm, content);
+    compiler.emit_constant(s.into());
 }
