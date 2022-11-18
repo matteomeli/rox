@@ -1,9 +1,11 @@
+use fnv::FnvHashMap;
+
 use crate::{
     chunk::{Chunk, OpCode},
     debug,
     parser::{get_rule, Precedence},
     scanner::{Scanner, Token, TokenType},
-    value::{create_string, Value},
+    value::{create_string, InternedString, Value},
     vm::{CompileError, VM},
 };
 
@@ -17,6 +19,7 @@ pub struct Compiler<'src, 'vm> {
     first_error: Option<CompileError>,
     panic_mode: bool,
     chunk: Chunk,
+    string_constants: FnvHashMap<InternedString, Value>,
 }
 
 impl<'src, 'vm> Compiler<'src, 'vm> {
@@ -29,6 +32,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
             first_error: None,
             panic_mode: false,
             chunk: Chunk::default(),
+            string_constants: FnvHashMap::default(),
         }
     }
 
@@ -155,7 +159,17 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
     }
 
     pub fn identifier_constant(&mut self, name: Value) -> Result<usize, CompileError> {
-        self.chunk.add_constant(name)
+        let interned: InternedString = name.clone().try_into().unwrap();
+        match self.string_constants.get(&interned) {
+            Some(Value::Number(constant)) => Ok(*constant as usize),
+            None => {
+                let constant = self.chunk.add_constant(name)?;
+                self.string_constants
+                    .insert(interned, (constant as f64).into());
+                Ok(constant)
+            }
+            _ => unimplemented!(),
+        }
     }
 
     fn define_variable(&mut self, global: usize) {
