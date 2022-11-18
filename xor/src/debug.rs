@@ -21,6 +21,10 @@ pub(crate) fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
     let byte = chunk.code[offset];
     match OpCode::try_from(byte) {
         Ok(instruction) => match instruction {
+            OpCode::DefineGlobal => constant_instruction("DEFINE_GLOBAL", chunk, offset),
+            OpCode::GetGlobal => constant_instruction("GET_GLOBAL", chunk, offset),
+            OpCode::Pop => simple_instruction("POP", offset),
+            OpCode::Print => simple_instruction("PRINT", offset),
             OpCode::Return => simple_instruction("RETURN", offset),
             OpCode::Constant => constant_instruction("CONSTANT", chunk, offset),
             OpCode::ConstantLong => constant_long_instruction("CONSTANT_LONG", chunk, offset),

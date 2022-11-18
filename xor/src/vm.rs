@@ -1,11 +1,11 @@
 use std::fmt;
 
-use fnv::FnvHashSet;
+use fnv::{FnvHashMap, FnvHashSet};
 
 use crate::{
     chunk::{Chunk, OpCode},
     compiler,
-    value::{create_string, InternedString, ObjRoot, Value},
+    value::{create_string, InternedString, Value},
 };
 
 #[cfg(feature = "trace")]
@@ -17,6 +17,7 @@ pub enum RuntimeError {
     TypeError(&'static str, String, bool),
     UnknownOpCode,
     InvalidAddition(String, String),
+    UndefinedVariable(String),
 }
 
 impl fmt::Display for RuntimeError {
@@ -49,6 +50,7 @@ impl fmt::Display for RuntimeError {
                     write!(f, "Operands must be two numbers or two strings.")
                 }
             }
+            Self::UndefinedVariable(name) => write!(f, "Undefined variable '{}'.", name),
         }
     }
 }
@@ -95,6 +97,7 @@ pub struct VM {
     ip: usize,
     stack: Vec<Value>,
     pub strings: FnvHashSet<InternedString>,
+    globals: FnvHashMap<InternedString, Value>,
 }
 
 impl VM {
@@ -151,9 +154,30 @@ impl VM {
             self.ip += 1;
             match OpCode::try_from(byte) {
                 Ok(instruction) => match instruction {
-                    OpCode::Return => {
+                    OpCode::DefineGlobal => {
+                        let constant = self.read_constant(chunk);
+                        let name: InternedString = constant.try_into()?;
+                        self.globals.insert(name, self.peek_stack(0));
+                        self.pop_stack()?;
+                    }
+                    OpCode::GetGlobal => {
+                        let constant = self.read_constant(chunk);
+                        let name: InternedString = constant.clone().try_into()?;
+                        match self.globals.get(&name) {
+                            Some(value) => self.stack.push(value.clone()),
+                            None => {
+                                return rt(RuntimeError::UndefinedVariable(constant.try_into()?))
+                            }
+                        }
+                    }
+                    OpCode::Pop => {
+                        self.pop_stack()?;
+                    }
+                    OpCode::Print => {
                         let value = self.pop_stack()?;
                         println!("{}", value);
+                    }
+                    OpCode::Return => {
                         return Ok(());
                     }
                     OpCode::Constant => {

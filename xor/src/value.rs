@@ -75,6 +75,25 @@ impl TryFrom<Value> for f64 {
     }
 }
 
+impl TryFrom<Value> for String {
+    type Error = VMError;
+
+    #[allow(unreachable_patterns)]
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(obj_ref) => {
+                let s = &obj_ref.upgrade().unwrap().content;
+                return Ok(s.clone());
+            }
+            _ => Err(VMError::RuntimeError(RuntimeError::TypeError(
+                "string",
+                value.to_string(),
+                true,
+            ))),
+        }
+    }
+}
+
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -121,6 +140,21 @@ impl Eq for InternedString {}
 impl Borrow<str> for InternedString {
     fn borrow(&self) -> &str {
         self.0.content.borrow()
+    }
+}
+
+impl TryFrom<Value> for InternedString {
+    type Error = VMError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(obj_ref) => Ok(Self(obj_ref.upgrade().unwrap())),
+            _ => Err(VMError::RuntimeError(RuntimeError::TypeError(
+                "string",
+                value.to_string(),
+                false,
+            ))),
+        }
     }
 }
 

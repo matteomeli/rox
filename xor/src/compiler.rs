@@ -3,7 +3,7 @@ use crate::{
     debug,
     parser::{get_rule, Precedence},
     scanner::{Scanner, Token, TokenType},
-    value::Value,
+    value::{create_string, Value},
     vm::{CompileError, VM},
 };
 
@@ -83,6 +83,116 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         self.error_at_current(message, CompileError::ParseError);
     }
 
+    fn declaration(&mut self) {
+        if self.match_token(TokenType::Var) {
+            self.var_declaration();
+        } else {
+            self.statement();
+        }
+
+        if self.panic_mode {
+            self.synchronize();
+        }
+    }
+
+    fn statement(&mut self) {
+        if self.match_token(TokenType::Print) {
+            self.print_statement();
+        } else {
+            self.expression_statement();
+        }
+    }
+
+    fn print_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after value.");
+        self.emit_byte(OpCode::Print.into());
+    }
+
+    fn expression_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after expression.");
+        self.emit_byte(OpCode::Pop.into());
+    }
+
+    fn var_declaration(&mut self) {
+        match self.parse_variable("Expect variable name.") {
+            Err(e) => self.error(&format!("{}", e), e),
+            Ok(global) => {
+                if self.match_token(TokenType::Equal) {
+                    self.expression();
+                } else {
+                    self.emit_byte(OpCode::Nil.into());
+                }
+
+                self.consume(
+                    TokenType::Semicolon,
+                    "Expect ';' after variable declaration",
+                );
+
+                self.define_variable(global);
+            }
+        }
+    }
+
+    pub fn previous_identifier(&mut self) -> Value {
+        let name = &self.previous.as_ref().unwrap().lexeme.unwrap();
+        let vm = &mut self.vm;
+        create_string(vm, name).into()
+    }
+
+    fn parse_variable(&mut self, error_message: &str) -> Result<usize, CompileError> {
+        self.consume(TokenType::Identifier, error_message);
+        let identifier = self.previous_identifier();
+        self.identifier_constant(identifier)
+    }
+
+    pub fn identifier_constant(&mut self, name: Value) -> Result<usize, CompileError> {
+        self.chunk.add_constant(name)
+    }
+
+    fn define_variable(&mut self, global: usize) {
+        self.emit_bytes(OpCode::DefineGlobal.into(), global as u8);
+    }
+
+    fn synchronize(&mut self) {
+        self.panic_mode = false;
+
+        while !self.check_token(TokenType::Eof) {
+            if self.previous.as_ref().unwrap().token_type == TokenType::Semicolon {
+                return;
+            }
+            match self.current.as_ref().unwrap().token_type {
+                TokenType::Class
+                | TokenType::Fun
+                | TokenType::Var
+                | TokenType::For
+                | TokenType::If
+                | TokenType::While
+                | TokenType::Print
+                | TokenType::Return => return,
+                _ => (),
+            }
+
+            self.advance();
+        }
+    }
+
+    fn check_token(&self, token_type: TokenType) -> bool {
+        self.current
+            .iter()
+            .all(|token| token.token_type == token_type)
+    }
+
+    fn match_token(&mut self, token_type: TokenType) -> bool {
+        if !self.check_token(token_type) {
+            return false;
+        }
+
+        self.advance();
+        true
+    }
+
     fn error_at_current(&mut self, message: &str, error: CompileError) {
         if self.panic_mode {
             return;
@@ -136,13 +246,9 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
 
     pub fn emit_constant(&mut self, value: Value) {
         let line = self.previous.as_ref().unwrap().line;
-        match self.chunk.write_constant(value, line) {
-            Ok(_) => (),
-            Err(CompileError::TooManyConstants) => {
-                let message: &str = &format!("{}", CompileError::TooManyConstants);
-                self.error(message, CompileError::TooManyConstants);
-            }
-            _ => unimplemented!(),
+        if self.chunk.write_constant(value, line).is_err() {
+            let message: &str = &format!("{}", CompileError::TooManyConstants);
+            self.error(message, CompileError::TooManyConstants);
         }
     }
 }
@@ -161,7 +267,8 @@ pub(crate) fn compile(vm: &mut VM, source: &str) -> CompilerResult {
     let scanner = Scanner::new(source);
     let mut compiler = Compiler::new(vm, scanner);
     compiler.advance();
-    compiler.expression();
-    compiler.consume(TokenType::Eof, "Expected end of expression.");
+    while !compiler.match_token(TokenType::Eof) {
+        compiler.declaration();
+    }
     compiler.end()
 }

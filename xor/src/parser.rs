@@ -96,7 +96,10 @@ impl ParseRule {
                 precedence: Precedence::Comparison,
                 ..ParseRule::default()
             },
-            TokenType::Identifier => ParseRule::default(),
+            TokenType::Identifier => ParseRule {
+                prefix: Some(variable),
+                ..Default::default()
+            },
             TokenType::String => ParseRule {
                 prefix: Some(string),
                 ..ParseRule::default()
@@ -222,4 +225,11 @@ fn string(compiler: &mut Compiler) {
     let content = &quoted_content[1..quoted_content.len() - 1];
     let s = create_string(vm, content);
     compiler.emit_constant(s.into());
+}
+
+fn variable(compiler: &mut Compiler) {
+    let name = compiler.previous_identifier();
+    if let Ok(constant) = compiler.identifier_constant(name) {
+        compiler.emit_bytes(OpCode::GetGlobal.into(), constant as u8);
+    }
 }
