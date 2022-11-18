@@ -52,9 +52,12 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
     pub fn parse_precedence(&mut self, precendence: Precedence) {
         self.advance();
 
+        // Can the next rule assing?
+        let can_assign = precendence <= Precedence::Assignment;
+
         // Look up a prefix parser for the current token
         match get_rule(self.previous.as_ref().unwrap().token_type).prefix {
-            Some(rule) => rule(self),
+            Some(rule) => rule(self, can_assign),
             _ => {
                 self.error("Expect espression", CompileError::ParseError);
                 return;
@@ -68,7 +71,11 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
 
             get_rule(self.previous.as_ref().unwrap().token_type)
                 .infix
-                .unwrap()(self);
+                .unwrap()(self, can_assign);
+        }
+
+        if can_assign && self.match_token(TokenType::Equal) {
+            self.error("Invalid assignment target.", CompileError::ParseError);
         }
     }
 
@@ -152,6 +159,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
     }
 
     fn define_variable(&mut self, global: usize) {
+        // TODO: This only allows for globals "constants" less than 255, doesn't account for 24 bit long constant addressable range.
         self.emit_bytes(OpCode::DefineGlobal.into(), global as u8);
     }
 
@@ -184,7 +192,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
             .all(|token| token.token_type == token_type)
     }
 
-    fn match_token(&mut self, token_type: TokenType) -> bool {
+    pub fn match_token(&mut self, token_type: TokenType) -> bool {
         if !self.check_token(token_type) {
             return false;
         }

@@ -83,7 +83,7 @@ impl TryFrom<Value> for String {
         match value {
             Value::String(obj_ref) => {
                 let s = &obj_ref.upgrade().unwrap().content;
-                return Ok(s.clone());
+                Ok(s.clone())
             }
             _ => Err(VMError::RuntimeError(RuntimeError::TypeError(
                 "string",

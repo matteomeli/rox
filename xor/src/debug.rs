@@ -23,6 +23,7 @@ pub(crate) fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         Ok(instruction) => match instruction {
             OpCode::DefineGlobal => constant_instruction("DEFINE_GLOBAL", chunk, offset),
             OpCode::GetGlobal => constant_instruction("GET_GLOBAL", chunk, offset),
+            OpCode::SetGlobal => constant_instruction("SET_GLOBAL", chunk, offset),
             OpCode::Pop => simple_instruction("POP", offset),
             OpCode::Print => simple_instruction("PRINT", offset),
             OpCode::Return => simple_instruction("RETURN", offset),

@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::hash_map::Entry, fmt};
 
 use fnv::{FnvHashMap, FnvHashSet};
 
@@ -168,6 +168,16 @@ impl VM {
                             None => {
                                 return rt(RuntimeError::UndefinedVariable(constant.try_into()?))
                             }
+                        }
+                    }
+                    OpCode::SetGlobal => {
+                        let constant = self.read_constant(chunk);
+                        let name: InternedString = constant.clone().try_into()?;
+                        let value = self.peek_stack(0); // This is needed to avoid double self borrow but could result in an unnecessary clone in case of following else branch
+                        if let Entry::Occupied(mut e) = self.globals.entry(name) {
+                            e.insert(value);
+                        } else {
+                            return rt(RuntimeError::UndefinedVariable(constant.try_into()?));
                         }
                     }
                     OpCode::Pop => {

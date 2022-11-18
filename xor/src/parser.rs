@@ -19,7 +19,7 @@ pub enum Precedence {
     Primary,
 }
 
-type ParseFn = fn(&mut Compiler);
+type ParseFn = fn(&mut Compiler, bool);
 
 #[derive(Default)]
 pub struct ParseRule {
@@ -151,7 +151,7 @@ pub fn get_rule(token_type: TokenType) -> ParseRule {
     token_type.into()
 }
 
-fn number(compiler: &mut Compiler) {
+fn number(compiler: &mut Compiler, _can_assign: bool) {
     let n: f64 = compiler
         .previous
         .as_ref()
@@ -164,12 +164,12 @@ fn number(compiler: &mut Compiler) {
     compiler.emit_constant(n.into());
 }
 
-fn grouping(compiler: &mut Compiler) {
+fn grouping(compiler: &mut Compiler, _can_assign: bool) {
     compiler.expression();
     compiler.consume(TokenType::RightParen, "Expect ')' after expression.");
 }
 
-fn unary(compiler: &mut Compiler) {
+fn unary(compiler: &mut Compiler, _can_assign: bool) {
     let operator = compiler.previous.as_ref().unwrap();
     let token_type = operator.token_type;
     let line = operator.line; // Store the line now so it's not affected by the operand
@@ -185,7 +185,7 @@ fn unary(compiler: &mut Compiler) {
     }
 }
 
-fn binary(compiler: &mut Compiler) {
+fn binary(compiler: &mut Compiler, _can_assign: bool) {
     let operator = compiler.previous.as_ref().unwrap();
     let token_type = operator.token_type;
 
@@ -209,7 +209,7 @@ fn binary(compiler: &mut Compiler) {
     }
 }
 
-fn literal(compiler: &mut Compiler) {
+fn literal(compiler: &mut Compiler, _can_assign: bool) {
     match compiler.previous.as_ref().unwrap().token_type {
         TokenType::False => compiler.emit_byte(OpCode::False.into()),
         TokenType::Nil => compiler.emit_byte(OpCode::Nil.into()),
@@ -218,7 +218,7 @@ fn literal(compiler: &mut Compiler) {
     }
 }
 
-fn string(compiler: &mut Compiler) {
+fn string(compiler: &mut Compiler, _can_assign: bool) {
     let vm = &mut compiler.vm;
     let quoted_content = compiler.previous.as_ref().unwrap().lexeme.unwrap();
     // Remove string quotaion marks from lexeme
@@ -227,9 +227,15 @@ fn string(compiler: &mut Compiler) {
     compiler.emit_constant(s.into());
 }
 
-fn variable(compiler: &mut Compiler) {
+fn variable(compiler: &mut Compiler, can_assign: bool) {
     let name = compiler.previous_identifier();
     if let Ok(constant) = compiler.identifier_constant(name) {
-        compiler.emit_bytes(OpCode::GetGlobal.into(), constant as u8);
+        // TODO: This only allows for get/set globals "constants" less than 255, doesn't account for 24 bit long constant addressable range.
+        if can_assign && compiler.match_token(TokenType::Equal) {
+            compiler.expression();
+            compiler.emit_bytes(OpCode::SetGlobal.into(), constant as u8);
+        } else {
+            compiler.emit_bytes(OpCode::GetGlobal.into(), constant as u8);
+        }
     }
 }

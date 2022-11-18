@@ -9,6 +9,7 @@ pub const U24_MAX: u32 = (1_u32 << 24) - 1;
 pub enum OpCode {
     DefineGlobal,
     GetGlobal,
+    SetGlobal,
     Pop,
     Print,
     Return,
