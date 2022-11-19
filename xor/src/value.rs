@@ -14,6 +14,7 @@ pub type ObjRef<T> = Weak<Obj<T>>;
 pub enum Value {
     Bool(bool),
     Nil,
+    Undefined,
     Number(f64),
     String(ObjRef<String>),
 }
@@ -107,6 +108,7 @@ impl Display for Value {
                 }
             }
             Self::String(s) => write!(f, "{}", to_string(s)),
+            Self::Undefined => write!(f, "undefined"),
         }
     }
 }

@@ -1,5 +1,3 @@
-use fnv::FnvHashMap;
-
 use crate::{
     chunk::{Chunk, OpCode},
     debug,
@@ -19,7 +17,6 @@ pub struct Compiler<'src, 'vm> {
     first_error: Option<CompileError>,
     panic_mode: bool,
     chunk: Chunk,
-    string_constants: FnvHashMap<InternedString, Value>,
 }
 
 impl<'src, 'vm> Compiler<'src, 'vm> {
@@ -32,7 +29,6 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
             first_error: None,
             panic_mode: false,
             chunk: Chunk::default(),
-            string_constants: FnvHashMap::default(),
         }
     }
 
@@ -152,24 +148,25 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         create_string(vm, name).into()
     }
 
+    pub fn identifier_constant(&mut self, name: Value) -> Result<usize, CompileError> {
+        let interned: InternedString = name.clone().try_into().unwrap();
+        match self.vm.globals.get(&interned) {
+            Some(Value::Number(constant)) => Ok(*constant as usize),
+            None => {
+                let index = self.vm.global_values.len();
+                self.vm.global_values.push(Value::Undefined);
+                self.vm.global_names.push(name);
+                self.vm.globals.insert(interned, (index as f64).into());
+                Ok(index)
+            }
+            _ => unimplemented!(),
+        }
+    }
+
     fn parse_variable(&mut self, error_message: &str) -> Result<usize, CompileError> {
         self.consume(TokenType::Identifier, error_message);
         let identifier = self.previous_identifier();
         self.identifier_constant(identifier)
-    }
-
-    pub fn identifier_constant(&mut self, name: Value) -> Result<usize, CompileError> {
-        let interned: InternedString = name.clone().try_into().unwrap();
-        match self.string_constants.get(&interned) {
-            Some(Value::Number(constant)) => Ok(*constant as usize),
-            None => {
-                let constant = self.chunk.add_constant(name)?;
-                self.string_constants
-                    .insert(interned, (constant as f64).into());
-                Ok(constant)
-            }
-            _ => unimplemented!(),
-        }
     }
 
     fn define_variable(&mut self, global: usize) {
@@ -239,7 +236,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         #[cfg(feature = "dump")]
         {
             if self.first_error.is_none() {
-                debug::disassemble_chunk(&self.chunk, "code");
+                debug::disassemble_chunk(self.vm, &self.chunk, "code");
             }
         }
         match self.first_error {

@@ -1,4 +1,4 @@
-use std::{collections::hash_map::Entry, fmt};
+use std::fmt;
 
 use fnv::{FnvHashMap, FnvHashSet};
 
@@ -97,9 +97,12 @@ pub struct VM {
     ip: usize,
     stack: Vec<Value>,
     pub strings: FnvHashSet<InternedString>,
-    globals: FnvHashMap<InternedString, Value>,
+    pub globals: FnvHashMap<InternedString, Value>,
+    pub global_values: Vec<Value>,
+    pub global_names: Vec<Value>,
 }
 
+#[allow(dead_code)]
 impl VM {
     pub fn interpret(&mut self, source: &str) -> InterpretResult {
         let chunk = compiler::compile(self, source).map_err(VMError::CompileError)?;
@@ -147,7 +150,7 @@ impl VM {
                     }
                 }
                 println!();
-                debug::disassemble_instruction(chunk, self.ip);
+                debug::disassemble_instruction(self, chunk, self.ip);
             }
 
             let byte = chunk.code[self.ip];
@@ -155,30 +158,51 @@ impl VM {
             match OpCode::try_from(byte) {
                 Ok(instruction) => match instruction {
                     OpCode::DefineGlobal => {
-                        let constant = self.read_constant(chunk);
-                        let name: InternedString = constant.try_into()?;
-                        self.globals.insert(name, self.peek_stack(0));
-                        self.pop_stack()?;
+                        // let constant = self.read_constant(chunk);
+                        // let name: InternedString = constant.try_into()?;
+                        // self.globals.insert(name, self.peek_stack(0));
+                        // self.pop_stack()?;
+
+                        let index = self.read(chunk) as usize;
+                        self.global_values[index] = self.pop_stack()?;
                     }
                     OpCode::GetGlobal => {
-                        let constant = self.read_constant(chunk);
-                        let name: InternedString = constant.clone().try_into()?;
-                        match self.globals.get(&name) {
-                            Some(value) => self.stack.push(value.clone()),
-                            None => {
-                                return rt(RuntimeError::UndefinedVariable(constant.try_into()?))
-                            }
+                        // let constant = self.read_constant(chunk);
+                        // let name: InternedString = constant.clone().try_into()?;
+                        // match self.globals.get(&name) {
+                        //     Some(value) => self.stack.push(value.clone()),
+                        //     None => {
+                        //         return rt(RuntimeError::UndefinedVariable(constant.try_into()?))
+                        //     }
+                        // }
+
+                        let index = self.read(chunk) as usize;
+                        let value = &self.global_values[index];
+                        if let Value::Undefined = value {
+                            return rt(RuntimeError::UndefinedVariable(
+                                self.global_names[index].clone().try_into()?,
+                            ));
                         }
+                        self.stack.push(value.clone())
                     }
                     OpCode::SetGlobal => {
-                        let constant = self.read_constant(chunk);
-                        let name: InternedString = constant.clone().try_into()?;
-                        let value = self.peek_stack(0); // This is needed to avoid double self borrow but could result in an unnecessary clone in case of following else branch
-                        if let Entry::Occupied(mut e) = self.globals.entry(name) {
-                            e.insert(value);
-                        } else {
-                            return rt(RuntimeError::UndefinedVariable(constant.try_into()?));
+                        // let constant = self.read_constant(chunk);
+                        // let name: InternedString = constant.clone().try_into()?;
+                        // let value = self.peek_stack(0); // This is needed to avoid double self borrow but could result in an unnecessary clone in case of following else branch
+                        // if let Entry::Occupied(mut e) = self.globals.entry(name) {
+                        //     e.insert(value);
+                        // } else {
+                        //     return rt(RuntimeError::UndefinedVariable(constant.try_into()?));
+                        // }
+
+                        let index = self.read(chunk) as usize;
+                        let value = &self.global_values[index];
+                        if let Value::Undefined = value {
+                            return rt(RuntimeError::UndefinedVariable(
+                                self.global_names[index].clone().try_into()?,
+                            ));
                         }
+                        self.global_values[index] = self.peek_stack(0);
                     }
                     OpCode::Pop => {
                         self.pop_stack()?;
@@ -295,5 +319,28 @@ impl VM {
         ]);
         self.ip += 3;
         chunk.constants[constant_index as usize].clone()
+    }
+
+    fn read(&mut self, chunk: &Chunk) -> u8 {
+        let byte = chunk.code[self.ip];
+        self.ip += 1;
+        byte
+    }
+
+    fn read_short(&mut self, chunk: &Chunk) -> u16 {
+        let result = u16::from_le_bytes([chunk.code[self.ip + 1], chunk.code[self.ip + 2]]);
+        self.ip += 2;
+        result
+    }
+
+    fn read_u24(&mut self, chunk: &Chunk) -> u32 {
+        let result = u32::from_le_bytes([
+            chunk.code[self.ip + 1],
+            chunk.code[self.ip + 2],
+            chunk.code[self.ip + 3],
+            0,
+        ]);
+        self.ip += 3;
+        result
     }
 }

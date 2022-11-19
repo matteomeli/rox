@@ -1,7 +1,10 @@
-use crate::chunk::{Chunk, OpCode};
+use crate::{
+    chunk::{Chunk, OpCode},
+    vm::VM,
+};
 use std::convert::TryFrom;
 
-pub(crate) fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
+pub(crate) fn disassemble_instruction(vm: &VM, chunk: &Chunk, offset: usize) -> usize {
     print!("{:04} ", offset);
     let line = chunk
         .get_line(offset)
@@ -21,9 +24,9 @@ pub(crate) fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
     let byte = chunk.code[offset];
     match OpCode::try_from(byte) {
         Ok(instruction) => match instruction {
-            OpCode::DefineGlobal => constant_instruction("DEFINE_GLOBAL", chunk, offset),
-            OpCode::GetGlobal => constant_instruction("GET_GLOBAL", chunk, offset),
-            OpCode::SetGlobal => constant_instruction("SET_GLOBAL", chunk, offset),
+            OpCode::DefineGlobal => global_instruction("DEFINE_GLOBAL", vm, chunk, offset),
+            OpCode::GetGlobal => global_instruction("GET_GLOBAL", vm, chunk, offset),
+            OpCode::SetGlobal => global_instruction("SET_GLOBAL", vm, chunk, offset),
             OpCode::Pop => simple_instruction("POP", offset),
             OpCode::Print => simple_instruction("PRINT", offset),
             OpCode::Return => simple_instruction("RETURN", offset),
@@ -55,30 +58,37 @@ fn simple_instruction(name: &str, offset: usize) -> usize {
 }
 
 fn constant_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize {
-    let constant_index = chunk.code[offset + 1];
-    print!("{:<16} {:<4}", name, constant_index);
-    println!("{}", chunk.constants[constant_index as usize]);
+    let index = chunk.code[offset + 1];
+    print!("{:<16} {:<4}", name, index);
+    println!("{}", chunk.constants[index as usize]);
     offset + 2
 }
 
 fn constant_long_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize {
     // Decode constant index from "long" constant "u24" operand
-    let constant_index = u32::from_le_bytes([
+    let index = u32::from_le_bytes([
         chunk.code[offset + 1],
         chunk.code[offset + 2],
         chunk.code[offset + 3],
         0,
     ]);
-    print!("{:<16} {:<4}", name, constant_index);
-    println!("{}", chunk.constants[constant_index as usize]);
+    print!("{:<16} {:<4}", name, index);
+    println!("{}", chunk.constants[index as usize]);
     offset + 4
 }
 
-pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
+fn global_instruction(name: &str, vm: &VM, chunk: &Chunk, offset: usize) -> usize {
+    let index = chunk.code[offset + 1];
+    print!("{:<16} {:<4}", name, index);
+    println!("{}", vm.global_values[index as usize]);
+    offset + 2
+}
+
+pub fn disassemble_chunk(vm: &VM, chunk: &Chunk, name: &str) {
     println!("== {} ==", name);
 
     let mut offset = 0;
     while offset < chunk.code.len() {
-        offset = disassemble_instruction(chunk, offset);
+        offset = disassemble_instruction(vm, chunk, offset);
     }
 }
