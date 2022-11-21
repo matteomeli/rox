@@ -150,13 +150,14 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
 
     pub fn identifier_constant(&mut self, name: Value) -> Result<usize, CompileError> {
         let interned: InternedString = name.clone().try_into().unwrap();
-        match self.vm.globals.get(&interned) {
+        match self.vm.globals_indices.get(&interned) {
             Some(Value::Number(constant)) => Ok(*constant as usize),
             None => {
-                let index = self.vm.global_values.len();
-                self.vm.global_values.push(Value::Undefined);
-                self.vm.global_names.push(name);
-                self.vm.globals.insert(interned, (index as f64).into());
+                let index = self.vm.globals.len();
+                self.vm.globals.push((name, Value::Undefined));
+                self.vm
+                    .globals_indices
+                    .insert(interned, (index as f64).into());
                 Ok(index)
             }
             _ => unimplemented!(),

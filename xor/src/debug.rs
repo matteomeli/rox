@@ -80,7 +80,8 @@ fn constant_long_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize 
 fn global_instruction(name: &str, vm: &VM, chunk: &Chunk, offset: usize) -> usize {
     let index = chunk.code[offset + 1];
     print!("{:<16} {:<4}", name, index);
-    println!("{}", vm.global_values[index as usize]);
+    // Global variables are late bound, so they will be always undefined at this stage, print their names instead
+    println!("{}", vm.globals[index as usize].0);
     offset + 2
 }
 
