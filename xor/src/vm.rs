@@ -59,6 +59,9 @@ impl fmt::Display for RuntimeError {
 pub enum CompileError {
     ParseError,
     TooManyConstants,
+    TooManyLocals,
+    DuplicateName,
+    UninitializedLocal,
 }
 
 impl fmt::Display for CompileError {
@@ -66,6 +69,11 @@ impl fmt::Display for CompileError {
         match self {
             Self::ParseError => write!(f, "Parse error."),
             Self::TooManyConstants => write!(f, "Too many constants in one chunk."),
+            Self::TooManyLocals => write!(f, "Too many local variables in a function."),
+            Self::DuplicateName => write!(f, "Already a variable with this name in this scope."),
+            Self::UninitializedLocal => {
+                write!(f, "Can't read local variable in its own initializer.")
+            }
         }
     }
 }
@@ -158,13 +166,13 @@ impl VM {
                 Ok(instruction) => match instruction {
                     OpCode::DefineGlobal => {
                         let new_value = self.pop_stack()?;
-                        let index = self.read(chunk) as usize;
-                        let (_, value) = &mut self.globals[index];
+                        let slot = self.read(chunk) as usize;
+                        let (_, value) = &mut self.globals[slot];
                         *value = new_value;
                     }
                     OpCode::GetGlobal => {
-                        let index = self.read(chunk) as usize;
-                        let (name, value) = &self.globals[index];
+                        let slot = self.read(chunk) as usize;
+                        let (name, value) = &self.globals[slot];
                         if let Value::Undefined = value {
                             return rt(RuntimeError::UndefinedVariable(name.clone().try_into()?));
                         }
@@ -172,12 +180,20 @@ impl VM {
                     }
                     OpCode::SetGlobal => {
                         let new_value = self.peek_stack(0);
-                        let index = self.read(chunk) as usize;
-                        let (name, value) = &mut self.globals[index];
+                        let slot = self.read(chunk) as usize;
+                        let (name, value) = &mut self.globals[slot];
                         if let Value::Undefined = value {
                             return rt(RuntimeError::UndefinedVariable(name.clone().try_into()?));
                         }
                         *value = new_value;
+                    }
+                    OpCode::GetLocal => {
+                        let slot = self.read(chunk);
+                        self.stack.push(self.stack[slot as usize].clone());
+                    }
+                    OpCode::SetLocal => {
+                        let slot = self.read(chunk);
+                        self.stack[slot as usize] = self.peek_stack(0);
                     }
                     OpCode::Pop => {
                         self.pop_stack()?;

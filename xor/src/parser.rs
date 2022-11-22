@@ -228,14 +228,35 @@ fn string(compiler: &mut Compiler, _can_assign: bool) {
 }
 
 fn variable(compiler: &mut Compiler, can_assign: bool) {
+    let name_str = compiler.previous.as_ref().unwrap().lexeme.unwrap();
     let name = compiler.previous_identifier();
-    if let Ok(constant) = compiler.identifier_constant(name) {
-        // TODO: This only allows for get/set globals "constants" less than 255, doesn't account for 24 bit long constant addressable range.
-        if can_assign && compiler.match_token(TokenType::Equal) {
-            compiler.expression();
-            compiler.emit_bytes(OpCode::SetGlobal.into(), constant as u8);
-        } else {
-            compiler.emit_bytes(OpCode::GetGlobal.into(), constant as u8);
+    match compiler.resolve_local(name_str) {
+        Err(e) => {
+            compiler.short_error(e);
+        }
+        Ok(slot) => {
+            let (get_op, set_op, arg) = match slot {
+                Some(slot) => (OpCode::GetLocal, OpCode::SetLocal, Ok(slot)),
+                None => {
+                    // TODO: This only allows for get/set globals "constants" less than 255, doesn't account for 24 bit long constant addressable range.
+                    (
+                        OpCode::GetGlobal,
+                        OpCode::SetGlobal,
+                        compiler.identifier_constant(name).map(|s| s as u8),
+                    )
+                }
+            };
+            match arg {
+                Err(e) => compiler.short_error(e),
+                Ok(slot) => {
+                    if can_assign && compiler.match_token(TokenType::Equal) {
+                        compiler.expression();
+                        compiler.emit_bytes(set_op.into(), slot);
+                    } else {
+                        compiler.emit_bytes(get_op.into(), slot);
+                    }
+                }
+            }
         }
     }
 }

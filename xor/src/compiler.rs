@@ -9,6 +9,11 @@ use crate::{
 
 type CompilerResult = Result<Chunk, CompileError>;
 
+pub struct Local<'src> {
+    name: &'src str,
+    depth: Option<usize>,
+}
+
 pub struct Compiler<'src, 'vm> {
     pub vm: &'vm mut VM,
     scanner: Scanner<'src>,
@@ -17,6 +22,8 @@ pub struct Compiler<'src, 'vm> {
     first_error: Option<CompileError>,
     panic_mode: bool,
     chunk: Chunk,
+    scope_depth: usize,
+    locals: Vec<Local<'src>>,
 }
 
 impl<'src, 'vm> Compiler<'src, 'vm> {
@@ -29,6 +36,8 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
             first_error: None,
             panic_mode: false,
             chunk: Chunk::default(),
+            scope_depth: 0,
+            locals: Vec::default(),
         }
     }
 
@@ -105,6 +114,10 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
     fn statement(&mut self) {
         if self.match_token(TokenType::Print) {
             self.print_statement();
+        } else if self.match_token(TokenType::LeftBrace) {
+            self.begin_scope();
+            self.block();
+            self.end_scope();
         } else {
             self.expression_statement();
         }
@@ -114,6 +127,37 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         self.expression();
         self.consume(TokenType::Semicolon, "Expect ';' after value.");
         self.emit_byte(OpCode::Print.into());
+    }
+
+    fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        self.scope_depth -= 1;
+
+        // Pop all local variables at the scope just ended
+        while !self.locals.is_empty() {
+            if let Some(last) = self.locals.last() {
+                if last.depth.unwrap() > self.scope_depth {
+                    // TODO: Add POPN instruction to pop n elements from the stack
+                    self.emit_byte(OpCode::Pop.into());
+                    self.locals.pop();
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn block(&mut self) {
+        while !self.check_token(TokenType::RightBrace) && !self.check_token(TokenType::Eof) {
+            self.declaration();
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after block.");
     }
 
     fn expression_statement(&mut self) {
@@ -153,26 +197,89 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         match self.vm.globals_indices.get(&interned) {
             Some(Value::Number(constant)) => Ok(*constant as usize),
             None => {
-                let index = self.vm.globals.len();
+                let slot = self.vm.globals.len();
                 self.vm.globals.push((name, Value::Undefined));
                 self.vm
                     .globals_indices
-                    .insert(interned, (index as f64).into());
-                Ok(index)
+                    .insert(interned, (slot as f64).into());
+                Ok(slot)
             }
             _ => unimplemented!(),
         }
     }
 
-    fn parse_variable(&mut self, error_message: &str) -> Result<usize, CompileError> {
+    fn parse_variable(&mut self, error_message: &str) -> Result<Option<usize>, CompileError> {
         self.consume(TokenType::Identifier, error_message);
+
+        self.declare_variable();
+        if self.scope_depth > 0 {
+            return Ok(None);
+        }
+
         let identifier = self.previous_identifier();
-        self.identifier_constant(identifier)
+        self.identifier_constant(identifier).map(Some)
     }
 
-    fn define_variable(&mut self, global: usize) {
+    fn declare_variable(&mut self) {
+        if self.scope_depth == 0 {
+            return;
+        }
+
+        let name = self.previous.as_ref().unwrap().lexeme.unwrap();
+        for local in self.locals.iter().rev() {
+            if let Some(depth) = local.depth {
+                if depth < self.scope_depth {
+                    break;
+                }
+            }
+
+            if name == local.name {
+                self.short_error(CompileError::DuplicateName);
+                return;
+            }
+        }
+
+        self.add_local(name);
+    }
+
+    fn add_local(&mut self, name: &'src str) {
+        if self.locals.len() > u8::MAX as usize + 1 {
+            self.short_error(CompileError::TooManyLocals);
+            return;
+        }
+
+        self.locals.push(Local { name, depth: None });
+    }
+
+    pub fn resolve_local(&mut self, name: &str) -> Result<Option<u8>, CompileError> {
+        for (index, local) in self.locals.iter().enumerate().rev() {
+            if local.name == name {
+                if local.depth.is_none() {
+                    return Err(CompileError::UninitializedLocal);
+                }
+                return Ok(Some(index as u8));
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn define_variable(&mut self, global: Option<usize>) {
+        if self.scope_depth > 0 {
+            self.mark_initialized();
+            return;
+        }
+
         // TODO: This only allows for globals "constants" less than 255, doesn't account for 24 bit long constant addressable range.
-        self.emit_bytes(OpCode::DefineGlobal.into(), global as u8);
+        self.emit_bytes(OpCode::DefineGlobal.into(), global.unwrap() as u8);
+    }
+
+    fn mark_initialized(&mut self) {
+        if self.scope_depth == 0 {
+            return;
+        }
+
+        self.locals.last_mut().unwrap().depth = Some(self.scope_depth);
     }
 
     fn synchronize(&mut self) {
@@ -230,6 +337,10 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         self.first_error = Some(error);
         self.first_error = self.first_error.or(Some(error));
         self.panic_mode = true;
+    }
+
+    pub fn short_error(&mut self, error: CompileError) {
+        self.error(&error.to_string(), error);
     }
 
     fn end(mut self) -> CompilerResult {
