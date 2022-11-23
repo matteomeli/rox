@@ -4,7 +4,7 @@ use crate::{value::Value, vm::CompileError};
 
 pub const U24_MAX: u32 = (1_u32 << 24) - 1;
 
-#[derive(IntoPrimitive, TryFromPrimitive)]
+#[derive(IntoPrimitive, TryFromPrimitive, PartialEq, Eq)]
 #[repr(u8)]
 pub enum OpCode {
     DefineGlobal,

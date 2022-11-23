@@ -17,13 +17,13 @@ pub struct Local<'src> {
 }
 
 pub struct Compiler<'src, 'vm> {
-    pub vm: &'vm mut VM,
+    pub(crate) vm: &'vm mut VM,
     scanner: Scanner<'src>,
     pub(crate) previous: Option<Token<'src>>,
     current: Option<Token<'src>>,
     first_error: Option<CompileError>,
     panic_mode: bool,
-    chunk: Chunk,
+    pub(crate) chunk: Chunk,
     scope_depth: usize,
     locals: Vec<Local<'src>>,
     locals_indices: FnvHashMap<&'src str, Vec<usize>>,
@@ -105,7 +105,9 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
 
     fn declaration(&mut self) {
         if self.match_token(TokenType::Var) {
-            self.var_declaration();
+            self.var_declaration(false);
+        } else if self.match_token(TokenType::Let) {
+            self.var_declaration(true);
         } else {
             self.statement();
         }
@@ -174,8 +176,8 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         self.emit_byte(OpCode::Pop.into());
     }
 
-    fn var_declaration(&mut self) {
-        match self.parse_variable("Expect variable name.") {
+    fn var_declaration(&mut self, is_let: bool) {
+        match self.parse_variable("Expect variable name.", is_let) {
             Err(e) => self.error(&format!("{}", e), e),
             Ok(global) => {
                 if self.match_token(TokenType::Equal) {
@@ -216,15 +218,26 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         }
     }
 
-    fn parse_variable(&mut self, error_message: &str) -> Result<Option<usize>, CompileError> {
+    fn parse_variable(
+        &mut self,
+        error_message: &str,
+        is_let: bool,
+    ) -> Result<Option<usize>, CompileError> {
         self.consume(TokenType::Identifier, error_message);
+
+        let identifier = self.previous_identifier();
+
+        // Mark a variable as let-declared to reason about assignment
+        if is_let {
+            let identifier_interned: InternedString = identifier.clone().try_into().unwrap();
+            self.vm.lets.insert(identifier_interned);
+        }
 
         self.declare_variable();
         if self.scope_depth > 0 {
             return Ok(None);
         }
 
-        let identifier = self.previous_identifier();
         self.identifier_constant(identifier).map(Some)
     }
 
@@ -305,6 +318,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
             match self.current.as_ref().unwrap().token_type {
                 TokenType::Class
                 | TokenType::Fun
+                | TokenType::Let
                 | TokenType::Var
                 | TokenType::For
                 | TokenType::If

@@ -62,6 +62,7 @@ pub enum CompileError {
     TooManyLocals,
     DuplicateName,
     UninitializedLocal,
+    LetReassignment,
 }
 
 impl fmt::Display for CompileError {
@@ -73,6 +74,9 @@ impl fmt::Display for CompileError {
             Self::DuplicateName => write!(f, "Already a variable with this name in this scope."),
             Self::UninitializedLocal => {
                 write!(f, "Can't read local variable in its own initializer.")
+            }
+            Self::LetReassignment => {
+                write!(f, "Can't reassign to a let variable.")
             }
         }
     }
@@ -103,10 +107,11 @@ fn rt(re: RuntimeError) -> InterpretResult {
 #[derive(Default)]
 pub struct VM {
     ip: usize,
-    stack: Vec<Value>,
-    pub strings: FnvHashSet<InternedString>,
-    pub globals_indices: FnvHashMap<InternedString, Value>, // Associates an index in globals for each global variable identifier
-    pub globals: Vec<(Value, Value)>, // Packs a (name, value) pair for each global variable
+    pub(crate) stack: Vec<Value>,
+    pub(crate) strings: FnvHashSet<InternedString>,
+    pub(crate) globals_indices: FnvHashMap<InternedString, Value>, // Associates an index in globals for each global variable identifier
+    pub(crate) globals: Vec<(Value, Value)>, // Packs a (name, value) pair for each global variable
+    pub(crate) lets: FnvHashSet<InternedString>, // Stores variables declared by let that can be assigned only once
 }
 
 #[allow(dead_code)]

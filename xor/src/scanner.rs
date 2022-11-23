@@ -38,6 +38,7 @@ pub enum TokenType {
     For,
     Fun,
     If,
+    Let,
     Nil,
     Or,
     Print,
@@ -344,6 +345,7 @@ impl<'a> Scanner<'a> {
                 }
             }
             "i" => check_keyword(word, "if", 1, TokenType::If),
+            "l" => check_keyword(word, "let", 1, TokenType::Let),
             "n" => check_keyword(word, "nil", 1, TokenType::Nil),
             "o" => check_keyword(word, "or", 1, TokenType::Or),
             "p" => check_keyword(word, "print", 1, TokenType::Print),

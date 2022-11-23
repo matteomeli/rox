@@ -1,6 +1,12 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
-use crate::{chunk::OpCode, compiler::Compiler, scanner::TokenType, value::create_string};
+use crate::{
+    chunk::OpCode,
+    compiler::Compiler,
+    scanner::TokenType,
+    value::{create_string, InternedString, Value},
+    vm::CompileError,
+};
 
 #[derive(Default, IntoPrimitive, TryFromPrimitive, PartialEq, Eq, PartialOrd)]
 #[repr(u8)]
@@ -118,6 +124,7 @@ impl ParseRule {
             TokenType::For => ParseRule::default(),
             TokenType::Fun => ParseRule::default(),
             TokenType::If => ParseRule::default(),
+            TokenType::Let => ParseRule::default(),
             TokenType::Nil => ParseRule {
                 prefix: Some(literal),
                 ..Default::default()
@@ -242,14 +249,41 @@ fn variable(compiler: &mut Compiler, can_assign: bool) {
                     (
                         OpCode::GetGlobal,
                         OpCode::SetGlobal,
-                        compiler.identifier_constant(name).map(|s| s as u8),
+                        compiler.identifier_constant(name.clone()).map(|s| s as u8),
                     )
                 }
             };
             match arg {
                 Err(e) => compiler.short_error(e),
                 Ok(slot) => {
+                    // Check let assignment
+
+                    let name_interned: InternedString = name.clone().try_into().unwrap();
                     if can_assign && compiler.match_token(TokenType::Equal) {
+                        if compiler.vm.lets.contains(&name_interned) {
+                            // If the variable's (global or local) slot in the constants array is not 'nil', then variable has been assigned before
+                            if let Some(value) = compiler.chunk.constants.get(slot as usize) {
+                                if *value != Value::Nil {
+                                    compiler.short_error(CompileError::LetReassignment);
+                                    return;
+                                }
+                            }
+
+                            // Special case for globals, that can be declared and assigned at different stages in the repl
+                            // and in that case survive multiple compile/execution passes.
+                            if set_op == OpCode::SetGlobal {
+                                if let Some((_, value)) = compiler.vm.globals.get(slot as usize) {
+                                    match value {
+                                        Value::Undefined | Value::Nil => (),
+                                        _ => {
+                                            compiler.short_error(CompileError::LetReassignment);
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         compiler.expression();
                         compiler.emit_bytes(set_op.into(), slot);
                     } else {
