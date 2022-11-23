@@ -109,9 +109,9 @@ pub struct VM {
     ip: usize,
     pub(crate) stack: Vec<Value>,
     pub(crate) strings: FnvHashSet<InternedString>,
-    pub(crate) globals_indices: FnvHashMap<InternedString, Value>, // Associates an index in globals for each global variable identifier
+    pub(crate) globals_indices: FnvHashMap<InternedString, Value>, // Associates an index in 'globals' for each global variable identifier
     pub(crate) globals: Vec<(Value, Value)>, // Packs a (name, value) pair for each global variable
-    pub(crate) lets: FnvHashSet<InternedString>, // Stores variables declared by let that can be assigned only once
+    pub(crate) lets: FnvHashMap<InternedString, bool>, // Stores variables declared by let that can be assigned only once
 }
 
 #[allow(dead_code)]
@@ -119,16 +119,18 @@ impl VM {
     pub fn interpret(&mut self, source: &str) -> InterpretResult {
         let chunk = compiler::compile(self, source).map_err(VMError::CompileError)?;
         let result = self.run(&chunk);
-        if let Err(VMError::RuntimeError(ref e)) = result {
-            eprintln!("{}", e);
+        if let Err(VMError::RuntimeError(ref re)) = result {
+            eprintln!("{}", re);
             if let Some(n) = chunk.get_line(self.ip - 1) {
                 eprint!("[line {}] in ", n);
             } else {
                 eprint!("[unknown line] in ");
             }
             eprintln!("script");
+
             self.stack.clear();
         }
+
         result
     }
 

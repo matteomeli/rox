@@ -256,32 +256,15 @@ fn variable(compiler: &mut Compiler, can_assign: bool) {
             match arg {
                 Err(e) => compiler.short_error(e),
                 Ok(slot) => {
-                    // Check let assignment
-
-                    let name_interned: InternedString = name.clone().try_into().unwrap();
                     if can_assign && compiler.match_token(TokenType::Equal) {
-                        if compiler.vm.lets.contains(&name_interned) {
-                            // If the variable's (global or local) slot in the constants array is not 'nil', then variable has been assigned before
-                            if let Some(value) = compiler.chunk.constants.get(slot as usize) {
-                                if *value != Value::Nil {
-                                    compiler.short_error(CompileError::LetReassignment);
-                                    return;
-                                }
+                        // Disallow assignments to let variables after the first one
+                        let interned: InternedString = name.clone().try_into().unwrap();
+                        if let Some(was_assigned) = compiler.vm.lets.get_mut(&interned) {
+                            if *was_assigned {
+                                compiler.short_error(CompileError::LetReassignment);
+                                return;
                             }
-
-                            // Special case for globals, that can be declared and assigned at different stages in the repl
-                            // and in that case survive multiple compile/execution passes.
-                            if set_op == OpCode::SetGlobal {
-                                if let Some((_, value)) = compiler.vm.globals.get(slot as usize) {
-                                    match value {
-                                        Value::Undefined | Value::Nil => (),
-                                        _ => {
-                                            compiler.short_error(CompileError::LetReassignment);
-                                            return;
-                                        }
-                                    }
-                                }
-                            }
+                            *was_assigned = true;
                         }
 
                         compiler.expression();

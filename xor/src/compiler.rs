@@ -12,8 +12,8 @@ use crate::{
 type CompilerResult = Result<Chunk, CompileError>;
 
 pub struct Local<'src> {
-    name: &'src str,
-    depth: Option<usize>,
+    pub name: &'src str,
+    pub depth: Option<usize>,
 }
 
 pub struct Compiler<'src, 'vm> {
@@ -25,8 +25,8 @@ pub struct Compiler<'src, 'vm> {
     panic_mode: bool,
     pub(crate) chunk: Chunk,
     scope_depth: usize,
-    locals: Vec<Local<'src>>,
-    locals_indices: FnvHashMap<&'src str, Vec<usize>>,
+    pub(crate) locals_indices: FnvHashMap<&'src str, Vec<usize>>,
+    pub(crate) locals: Vec<Local<'src>>,
 }
 
 impl<'src, 'vm> Compiler<'src, 'vm> {
@@ -40,8 +40,8 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
             panic_mode: false,
             chunk: Chunk::default(),
             scope_depth: 0,
-            locals: Vec::default(),
             locals_indices: FnvHashMap::default(),
+            locals: Vec::default(),
         }
     }
 
@@ -226,40 +226,37 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         self.consume(TokenType::Identifier, error_message);
 
         let identifier = self.previous_identifier();
-
-        // Mark a variable as let-declared to reason about assignment
-        if is_let {
-            let identifier_interned: InternedString = identifier.clone().try_into().unwrap();
-            self.vm.lets.insert(identifier_interned);
+        self.declare_variable(identifier.clone(), is_let);
+        if self.scope_depth == 0 {
+            return self.identifier_constant(identifier).map(Some);
         }
 
-        self.declare_variable();
-        if self.scope_depth > 0 {
-            return Ok(None);
-        }
-
-        self.identifier_constant(identifier).map(Some)
+        Ok(None)
     }
 
-    fn declare_variable(&mut self) {
-        if self.scope_depth == 0 {
-            return;
-        }
-
-        let name = self.previous.as_ref().unwrap().lexeme.unwrap();
-        if let Some(locals_indices) = self.locals_indices.get(name) {
-            if let Some(index) = locals_indices.last() {
-                let local = &self.locals[*index];
-                if let Some(depth) = local.depth {
-                    if depth == self.scope_depth {
-                        self.short_error(CompileError::DuplicateName);
-                        return;
+    fn declare_variable(&mut self, name: Value, is_let: bool) {
+        if self.scope_depth > 0 {
+            let name = self.previous.as_ref().unwrap().lexeme.unwrap();
+            if let Some(locals_indices) = self.locals_indices.get(name) {
+                if let Some(index) = locals_indices.last() {
+                    let local = &self.locals[*index];
+                    if let Some(depth) = local.depth {
+                        if depth == self.scope_depth {
+                            self.short_error(CompileError::DuplicateName);
+                            return;
+                        }
                     }
                 }
             }
+
+            self.add_local(name);
         }
 
-        self.add_local(name);
+        // Mark a variable as let-declared to reason about assignment
+        if is_let {
+            let name_interned: InternedString = name.clone().try_into().unwrap();
+            self.vm.lets.insert(name_interned, false);
+        }
     }
 
     fn add_local(&mut self, name: &'src str) {
