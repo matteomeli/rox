@@ -25,10 +25,17 @@ pub(crate) fn disassemble_instruction(vm: &VM, chunk: &Chunk, offset: usize) -> 
     match OpCode::try_from(byte) {
         Ok(instruction) => match instruction {
             OpCode::DefineGlobal => global_instruction("DEFINE_GLOBAL", vm, chunk, offset),
+            OpCode::DefineGlobalLong => {
+                global_long_instruction("DEFINE_GLOBAL_LONG", vm, chunk, offset)
+            }
             OpCode::GetGlobal => global_instruction("GET_GLOBAL", vm, chunk, offset),
+            OpCode::GetGlobalLong => global_long_instruction("GET_GLOBAL_LONG", vm, chunk, offset),
             OpCode::SetGlobal => global_instruction("SET_GLOBAL", vm, chunk, offset),
+            OpCode::SetGlobalLong => global_long_instruction("SET_GLOBAL_LONG", vm, chunk, offset),
             OpCode::GetLocal => byte_instruction("GET_LOCAL", chunk, offset),
+            OpCode::GetLocalLong => byte_long_instruction("GET_LOCAL_LONG", chunk, offset),
             OpCode::SetLocal => byte_instruction("SET_LOCAL", chunk, offset),
+            OpCode::SetLocalLong => byte_long_instruction("SET_LOCAL_LONG", chunk, offset),
             OpCode::Pop => simple_instruction("POP", offset),
             OpCode::Print => simple_instruction("PRINT", offset),
             OpCode::Return => simple_instruction("RETURN", offset),
@@ -87,12 +94,40 @@ fn global_instruction(name: &str, vm: &VM, chunk: &Chunk, offset: usize) -> usiz
     offset + 2
 }
 
+fn global_long_instruction(name: &str, vm: &VM, chunk: &Chunk, offset: usize) -> usize {
+    // Decode constant slot from "long" constant "u24" operand
+    let slot = u32::from_le_bytes([
+        chunk.code[offset + 1],
+        chunk.code[offset + 2],
+        chunk.code[offset + 3],
+        0,
+    ]);
+    print!("{:<16} {:<4}", name, slot);
+    // Global variables are late bound, so they will be always undefined at this stage, print their names instead
+    println!("{}", vm.globals[slot as usize].0);
+    offset + 4
+}
+
 fn byte_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize {
     let slot = chunk.code[offset + 1];
     print!("{:<16} {:<4}", name, slot);
     // TODO: This doesn't allow to track/debug the local name, only its slot
     println!("{}", slot);
     offset + 2
+}
+
+fn byte_long_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize {
+    // Decode constant slot from "long" constant "u24" operand
+    let slot = u32::from_le_bytes([
+        chunk.code[offset + 1],
+        chunk.code[offset + 2],
+        chunk.code[offset + 3],
+        0,
+    ]);
+    print!("{:<16} {:<4}", name, slot);
+    // TODO: This doesn't allow to track/debug the local name, only its slot
+    println!("{}", slot);
+    offset + 4
 }
 
 pub fn disassemble_chunk(vm: &VM, chunk: &Chunk, name: &str) {

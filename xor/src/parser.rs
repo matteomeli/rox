@@ -4,7 +4,7 @@ use crate::{
     chunk::OpCode,
     compiler::Compiler,
     scanner::TokenType,
-    value::{create_string, InternedString, Value},
+    value::{create_string, InternedString},
     vm::CompileError,
 };
 
@@ -242,16 +242,21 @@ fn variable(compiler: &mut Compiler, can_assign: bool) {
             compiler.short_error(e);
         }
         Ok(slot) => {
-            let (get_op, set_op, arg) = match slot {
-                Some(slot) => (OpCode::GetLocal, OpCode::SetLocal, Ok(slot)),
-                None => {
-                    // TODO: This only allows for get/set globals "constants" less than 255, doesn't account for 24 bit long constant addressable range.
-                    (
-                        OpCode::GetGlobal,
-                        OpCode::SetGlobal,
-                        compiler.identifier_constant(name.clone()).map(|s| s as u8),
-                    )
-                }
+            let (get_op, get_op_long, set_op, set_op_long, arg) = match slot {
+                Some(slot) => (
+                    OpCode::GetLocal,
+                    OpCode::GetLocalLong,
+                    OpCode::SetLocal,
+                    OpCode::SetLocalLong,
+                    Ok(slot),
+                ),
+                None => (
+                    OpCode::GetGlobal,
+                    OpCode::GetGlobalLong,
+                    OpCode::SetGlobal,
+                    OpCode::SetGlobalLong,
+                    compiler.identifier_constant(name.clone()),
+                ),
             };
             match arg {
                 Err(e) => compiler.short_error(e),
@@ -268,9 +273,9 @@ fn variable(compiler: &mut Compiler, can_assign: bool) {
                         }
 
                         compiler.expression();
-                        compiler.emit_bytes(set_op.into(), slot);
+                        compiler.emit_variable(set_op, set_op_long, slot);
                     } else {
-                        compiler.emit_bytes(get_op.into(), slot);
+                        compiler.emit_variable(get_op, get_op_long, slot);
                     }
                 }
             }

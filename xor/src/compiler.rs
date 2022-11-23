@@ -1,7 +1,7 @@
 use fnv::FnvHashMap;
 
 use crate::{
-    chunk::{Chunk, OpCode},
+    chunk::{Chunk, OpCode, U24_MAX},
     debug,
     parser::{get_rule, Precedence},
     scanner::{Scanner, Token, TokenType},
@@ -179,8 +179,19 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
     fn var_declaration(&mut self, is_let: bool) {
         match self.parse_variable("Expect variable name.", is_let) {
             Err(e) => self.error(&format!("{}", e), e),
-            Ok(global) => {
+            Ok(slot) => {
+                let identifier = self.previous_identifier();
                 if self.match_token(TokenType::Equal) {
+                    // Disallow assignments to let variables after the first one
+                    let interned: InternedString = identifier.clone().try_into().unwrap();
+                    if let Some(was_assigned) = self.vm.lets.get_mut(&interned) {
+                        if *was_assigned {
+                            self.short_error(CompileError::LetReassignment);
+                            return;
+                        }
+                        *was_assigned = true;
+                    }
+
                     self.expression();
                 } else {
                     self.emit_byte(OpCode::Nil.into());
@@ -191,7 +202,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
                     "Expect ';' after variable declaration",
                 );
 
-                self.define_variable(global);
+                self.define_variable(slot);
             }
         }
     }
@@ -205,8 +216,12 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
     pub fn identifier_constant(&mut self, name: Value) -> Result<usize, CompileError> {
         let interned: InternedString = name.clone().try_into().unwrap();
         match self.vm.globals_indices.get(&interned) {
-            Some(Value::Number(constant)) => Ok(*constant as usize),
+            Some(Value::Number(slot)) => Ok(*slot as usize),
             None => {
+                if self.vm.globals.len() == U24_MAX as usize + 1 {
+                    return Err(CompileError::TooManyGlobals);
+                }
+
                 let slot = self.vm.globals.len();
                 self.vm.globals.push((name, Value::Undefined));
                 self.vm
@@ -260,7 +275,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
     }
 
     fn add_local(&mut self, name: &'src str) {
-        if self.locals.len() > u8::MAX as usize + 1 {
+        if self.locals.len() == U24_MAX as usize + 1 {
             self.short_error(CompileError::TooManyLocals);
             return;
         }
@@ -273,28 +288,31 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         indices.push(self.locals.len() - 1);
     }
 
-    pub fn resolve_local(&mut self, name: &str) -> Result<Option<u8>, CompileError> {
+    pub fn resolve_local(&mut self, name: &str) -> Result<Option<usize>, CompileError> {
         if let Some(locals_indices) = self.locals_indices.get(name) {
             if let Some(index) = locals_indices.last() {
                 let local = &self.locals[*index];
                 if local.depth.is_none() {
                     return Err(CompileError::UninitializedLocal);
                 }
-                return Ok(Some(*index as u8));
+                return Ok(Some(*index));
             }
         }
 
         Ok(None)
     }
 
-    fn define_variable(&mut self, global: Option<usize>) {
+    fn define_variable(&mut self, slot: Option<usize>) {
         if self.scope_depth > 0 {
             self.mark_initialized();
             return;
         }
 
-        // TODO: This only allows for globals "constants" less than 255, doesn't account for 24 bit long constant addressable range.
-        self.emit_bytes(OpCode::DefineGlobal.into(), global.unwrap() as u8);
+        self.emit_variable(
+            OpCode::DefineGlobal,
+            OpCode::DefineGlobalLong,
+            slot.unwrap(),
+        );
     }
 
     fn mark_initialized(&mut self) {
@@ -404,6 +422,20 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         if self.chunk.write_constant(value, line).is_err() {
             let message: &str = &format!("{}", CompileError::TooManyConstants);
             self.error(message, CompileError::TooManyConstants);
+        }
+    }
+
+    pub fn emit_variable(&mut self, op: OpCode, op_long: OpCode, slot: usize) {
+        if slot < u8::MAX as usize + 1 {
+            self.emit_bytes(op.into(), slot as u8);
+        } else {
+            // Emit "long" opcode and slot with 24 bit operand
+            self.emit_byte(op_long.into());
+            // Convert to "u24" from usize with little-endian ordering
+            let [a, b, c, ..] = slot.to_le_bytes();
+            self.emit_byte(a);
+            self.emit_byte(b);
+            self.emit_byte(c);
         }
     }
 }

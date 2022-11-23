@@ -8,10 +8,15 @@ pub const U24_MAX: u32 = (1_u32 << 24) - 1;
 #[repr(u8)]
 pub enum OpCode {
     DefineGlobal,
+    DefineGlobalLong,
     GetGlobal,
+    GetGlobalLong,
     SetGlobal,
+    SetGlobalLong,
     GetLocal,
+    GetLocalLong,
     SetLocal,
+    SetLocalLong,
     Pop,
     Print,
     Return,
@@ -60,7 +65,7 @@ impl Chunk {
 
     pub fn write_constant(&mut self, value: Value, line: u32) -> Result<usize, CompileError> {
         let constant = self.add_constant(value)?;
-        if self.constants.len() < (u8::MAX as usize) {
+        if self.constants.len() < u8::MAX as usize + 1 {
             self.write(OpCode::Constant.into(), line);
             self.write(constant as u8, line);
         } else {
@@ -77,7 +82,7 @@ impl Chunk {
     }
 
     pub fn add_constant(&mut self, value: Value) -> Result<usize, CompileError> {
-        if self.constants.len() > (U24_MAX as usize) {
+        if self.constants.len() > U24_MAX as usize {
             return Err(CompileError::TooManyConstants);
         }
         self.constants.push(value);

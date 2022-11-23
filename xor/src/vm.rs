@@ -63,6 +63,7 @@ pub enum CompileError {
     DuplicateName,
     UninitializedLocal,
     LetReassignment,
+    TooManyGlobals,
 }
 
 impl fmt::Display for CompileError {
@@ -78,6 +79,7 @@ impl fmt::Display for CompileError {
             Self::LetReassignment => {
                 write!(f, "Can't reassign to a let variable.")
             }
+            Self::TooManyGlobals => write!(f, "Too many global variables."),
         }
     }
 }
@@ -171,35 +173,55 @@ impl VM {
             self.ip += 1;
             match OpCode::try_from(byte) {
                 Ok(instruction) => match instruction {
-                    OpCode::DefineGlobal => {
+                    OpCode::DefineGlobal | OpCode::DefineGlobalLong => {
                         let new_value = self.pop_stack()?;
-                        let slot = self.read(chunk) as usize;
+                        let slot = if instruction == OpCode::DefineGlobal {
+                            self.read(chunk) as usize
+                        } else {
+                            self.read_u24(chunk) as usize
+                        };
                         let (_, value) = &mut self.globals[slot];
                         *value = new_value;
                     }
-                    OpCode::GetGlobal => {
-                        let slot = self.read(chunk) as usize;
+                    OpCode::GetGlobal | OpCode::GetGlobalLong => {
+                        let slot = if instruction == OpCode::GetGlobal {
+                            self.read(chunk) as usize
+                        } else {
+                            self.read_u24(chunk) as usize
+                        };
                         let (name, value) = &self.globals[slot];
                         if let Value::Undefined = value {
                             return rt(RuntimeError::UndefinedVariable(name.clone().try_into()?));
                         }
                         self.stack.push(value.clone())
                     }
-                    OpCode::SetGlobal => {
+                    OpCode::SetGlobal | OpCode::SetGlobalLong => {
                         let new_value = self.peek_stack(0);
-                        let slot = self.read(chunk) as usize;
+                        let slot = if instruction == OpCode::SetGlobal {
+                            self.read(chunk) as usize
+                        } else {
+                            self.read_u24(chunk) as usize
+                        };
                         let (name, value) = &mut self.globals[slot];
                         if let Value::Undefined = value {
                             return rt(RuntimeError::UndefinedVariable(name.clone().try_into()?));
                         }
                         *value = new_value;
                     }
-                    OpCode::GetLocal => {
-                        let slot = self.read(chunk);
+                    OpCode::GetLocal | OpCode::GetLocalLong => {
+                        let slot = if instruction == OpCode::GetLocal {
+                            self.read(chunk) as usize
+                        } else {
+                            self.read_u24(chunk) as usize
+                        };
                         self.stack.push(self.stack[slot as usize].clone());
                     }
-                    OpCode::SetLocal => {
-                        let slot = self.read(chunk);
+                    OpCode::SetLocal | OpCode::SetLocalLong => {
+                        let slot = if instruction == OpCode::SetLocal {
+                            self.read(chunk) as usize
+                        } else {
+                            self.read_u24(chunk) as usize
+                        };
                         self.stack[slot as usize] = self.peek_stack(0);
                     }
                     OpCode::Pop => {
@@ -303,20 +325,20 @@ impl VM {
     }
 
     fn read_constant(&mut self, chunk: &Chunk) -> Value {
-        let constant_index = chunk.code[self.ip];
+        let slot = chunk.code[self.ip];
         self.ip += 1;
-        chunk.constants[constant_index as usize].clone()
+        chunk.constants[slot as usize].clone()
     }
 
     fn read_constant_long(&mut self, chunk: &Chunk) -> Value {
-        let constant_index = u32::from_le_bytes([
+        let slot = u32::from_le_bytes([
+            chunk.code[self.ip],
             chunk.code[self.ip + 1],
             chunk.code[self.ip + 2],
-            chunk.code[self.ip + 3],
             0,
         ]);
         self.ip += 3;
-        chunk.constants[constant_index as usize].clone()
+        chunk.constants[slot as usize].clone()
     }
 
     fn read(&mut self, chunk: &Chunk) -> u8 {
@@ -326,19 +348,19 @@ impl VM {
     }
 
     fn read_short(&mut self, chunk: &Chunk) -> u16 {
-        let result = u16::from_le_bytes([chunk.code[self.ip + 1], chunk.code[self.ip + 2]]);
+        let slot = u16::from_le_bytes([chunk.code[self.ip], chunk.code[self.ip + 1]]);
         self.ip += 2;
-        result
+        slot
     }
 
     fn read_u24(&mut self, chunk: &Chunk) -> u32 {
-        let result = u32::from_le_bytes([
+        let slot = u32::from_le_bytes([
+            chunk.code[self.ip],
             chunk.code[self.ip + 1],
             chunk.code[self.ip + 2],
-            chunk.code[self.ip + 3],
             0,
         ]);
         self.ip += 3;
-        result
+        slot
     }
 }
