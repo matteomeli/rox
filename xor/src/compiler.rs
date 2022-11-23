@@ -1,3 +1,5 @@
+use fnv::FnvHashMap;
+
 use crate::{
     chunk::{Chunk, OpCode},
     debug,
@@ -24,6 +26,7 @@ pub struct Compiler<'src, 'vm> {
     chunk: Chunk,
     scope_depth: usize,
     locals: Vec<Local<'src>>,
+    locals_indices: FnvHashMap<&'src str, Vec<usize>>,
 }
 
 impl<'src, 'vm> Compiler<'src, 'vm> {
@@ -38,6 +41,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
             chunk: Chunk::default(),
             scope_depth: 0,
             locals: Vec::default(),
+            locals_indices: FnvHashMap::default(),
         }
     }
 
@@ -140,9 +144,13 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         while !self.locals.is_empty() {
             if let Some(last) = self.locals.last() {
                 if last.depth.unwrap() > self.scope_depth {
+                    self.locals_indices.entry(last.name).and_modify(|indices| {
+                        indices.pop();
+                    });
+                    self.locals.pop();
+
                     // TODO: Add POPN instruction to pop n elements from the stack
                     self.emit_byte(OpCode::Pop.into());
-                    self.locals.pop();
                 } else {
                     break;
                 }
@@ -226,16 +234,15 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         }
 
         let name = self.previous.as_ref().unwrap().lexeme.unwrap();
-        for local in self.locals.iter().rev() {
-            if let Some(depth) = local.depth {
-                if depth < self.scope_depth {
-                    break;
+        if let Some(locals_indices) = self.locals_indices.get(name) {
+            if let Some(index) = locals_indices.last() {
+                let local = &self.locals[*index];
+                if let Some(depth) = local.depth {
+                    if depth == self.scope_depth {
+                        self.short_error(CompileError::DuplicateName);
+                        return;
+                    }
                 }
-            }
-
-            if name == local.name {
-                self.short_error(CompileError::DuplicateName);
-                return;
             }
         }
 
@@ -249,15 +256,21 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         }
 
         self.locals.push(Local { name, depth: None });
+        let indices = self
+            .locals_indices
+            .entry(name)
+            .or_insert_with(|| Vec::default());
+        indices.push(self.locals.len() - 1);
     }
 
     pub fn resolve_local(&mut self, name: &str) -> Result<Option<u8>, CompileError> {
-        for (index, local) in self.locals.iter().enumerate().rev() {
-            if local.name == name {
+        if let Some(locals_indices) = self.locals_indices.get(name) {
+            if let Some(index) = locals_indices.last() {
+                let local = &self.locals[*index];
                 if local.depth.is_none() {
                     return Err(CompileError::UninitializedLocal);
                 }
-                return Ok(Some(index as u8));
+                return Ok(Some(*index as u8));
             }
         }
 
