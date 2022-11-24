@@ -64,6 +64,8 @@ pub enum CompileError {
     UninitializedLocal,
     LetReassignment,
     TooManyGlobals,
+    TooFarToJump,
+    TooFarToLoop,
 }
 
 impl fmt::Display for CompileError {
@@ -80,6 +82,8 @@ impl fmt::Display for CompileError {
                 write!(f, "Can't reassign to a let variable.")
             }
             Self::TooManyGlobals => write!(f, "Too many global variables."),
+            Self::TooFarToJump => write!(f, "Too much code to jump over."),
+            Self::TooFarToLoop => write!(f, "Loop body too large."),
         }
     }
 }
@@ -306,6 +310,20 @@ impl VM {
                     OpCode::Subtract => binary_op!(-),
                     OpCode::Multiply => binary_op!(*),
                     OpCode::Divide => binary_op!(/),
+                    OpCode::JumpIfFalse => {
+                        let offset = self.read_short(chunk) as usize;
+                        if self.peek_stack(0).is_falsey() {
+                            self.ip += offset;
+                        }
+                    }
+                    OpCode::Jump => {
+                        let offset = self.read_short(chunk) as usize;
+                        self.ip += offset;
+                    }
+                    OpCode::Loop => {
+                        let offset = self.read_short(chunk) as usize;
+                        self.ip -= offset;
+                    }
                 },
                 Err(_) => return rt(RuntimeError::UnknownOpCode),
             }

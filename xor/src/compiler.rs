@@ -92,6 +92,15 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         }
     }
 
+    pub fn match_token(&mut self, token_type: TokenType) -> bool {
+        if !self.check_token(token_type) {
+            return false;
+        }
+
+        self.advance();
+        true
+    }
+
     pub fn consume(&mut self, token_type: TokenType, message: &str) {
         if let Some(token) = &self.current {
             if token.token_type == token_type {
@@ -101,6 +110,121 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         }
 
         self.error_at_current(message, CompileError::ParseError);
+    }
+
+    pub fn previous_identifier(&mut self) -> Value {
+        let name = &self.previous.as_ref().unwrap().lexeme.unwrap();
+        let vm = &mut self.vm;
+        create_string(vm, name).into()
+    }
+
+    pub fn identifier_constant(&mut self, name: Value) -> Result<usize, CompileError> {
+        let interned: InternedString = name.clone().try_into().unwrap();
+        match self.vm.globals_indices.get(&interned) {
+            Some(Value::Number(slot)) => Ok(*slot as usize),
+            None => {
+                if self.vm.globals.len() == U24_MAX as usize + 1 {
+                    return Err(CompileError::TooManyGlobals);
+                }
+
+                let slot = self.vm.globals.len();
+                self.vm.globals.push((name, Value::Undefined));
+                self.vm
+                    .globals_indices
+                    .insert(interned, (slot as f64).into());
+                Ok(slot)
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn resolve_local(&mut self, name: &str) -> Result<Option<usize>, CompileError> {
+        if let Some(locals_indices) = self.locals_indices.get(name) {
+            if let Some(index) = locals_indices.last() {
+                let local = &self.locals[*index];
+                if local.depth.is_none() {
+                    return Err(CompileError::UninitializedLocal);
+                }
+                return Ok(Some(*index));
+            }
+        }
+
+        Ok(None)
+    }
+
+    pub fn emit_byte(&mut self, byte: u8) {
+        let line = self.previous.as_ref().unwrap().line;
+        self.chunk.write(byte, line);
+    }
+
+    pub fn emit_byte_with_line(&mut self, byte: u8, line: u32) {
+        self.chunk.write(byte, line);
+    }
+
+    pub fn emit_bytes(&mut self, byte1: u8, byte2: u8) {
+        self.emit_byte(byte1);
+        self.emit_byte(byte2);
+    }
+
+    pub fn emit_return(&mut self) {
+        self.emit_byte(OpCode::Return.into());
+    }
+
+    pub fn emit_constant(&mut self, value: Value) {
+        let line = self.previous.as_ref().unwrap().line;
+        if self.chunk.write_constant(value, line).is_err() {
+            let message: &str = &format!("{}", CompileError::TooManyConstants);
+            self.error(message, CompileError::TooManyConstants);
+        }
+    }
+
+    pub fn emit_variable(&mut self, op: OpCode, op_long: OpCode, slot: usize) {
+        if slot < u8::MAX as usize + 1 {
+            self.emit_bytes(op.into(), slot as u8);
+        } else {
+            // Emit "long" opcode and slot with 24 bit operand
+            self.emit_byte(op_long.into());
+            // Convert to "u24" from usize with little-endian ordering
+            let [a, b, c, ..] = slot.to_le_bytes();
+            self.emit_byte(a);
+            self.emit_byte(b);
+            self.emit_byte(c);
+        }
+    }
+
+    pub fn emit_jump(&mut self, instruction: u8) -> usize {
+        self.emit_byte(instruction);
+        self.emit_byte(0xff_u8);
+        self.emit_byte(0xff_u8);
+        self.chunk.code.len() - 2
+    }
+
+    pub fn patch_jump(&mut self, offset: usize) {
+        let code = &mut self.chunk.code;
+        let jump = code.len() - offset - 2;
+
+        if jump > u16::MAX as usize {
+            self.short_error(CompileError::TooFarToJump);
+            return;
+        }
+
+        let [a, b, ..] = jump.to_le_bytes();
+        code[offset] = a;
+        code[offset + 1] = b;
+    }
+
+    pub fn emit_loop(&mut self, loop_start: usize) {
+        self.emit_byte(OpCode::Loop.into());
+
+        let offset = self.chunk.code.len() - loop_start + 2;
+        if offset > u16::MAX as usize {
+            self.short_error(CompileError::TooFarToJump);
+            return;
+        }
+
+        let [a, b, ..] = offset.to_le_bytes();
+        self.emit_byte(a);
+        self.emit_byte(b);
     }
 
     fn declaration(&mut self) {
@@ -115,65 +239,6 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         if self.panic_mode {
             self.synchronize();
         }
-    }
-
-    fn statement(&mut self) {
-        if self.match_token(TokenType::Print) {
-            self.print_statement();
-        } else if self.match_token(TokenType::LeftBrace) {
-            self.begin_scope();
-            self.block();
-            self.end_scope();
-        } else {
-            self.expression_statement();
-        }
-    }
-
-    fn print_statement(&mut self) {
-        self.expression();
-        self.consume(TokenType::Semicolon, "Expect ';' after value.");
-        self.emit_byte(OpCode::Print.into());
-    }
-
-    fn begin_scope(&mut self) {
-        self.scope_depth += 1;
-    }
-
-    fn end_scope(&mut self) {
-        self.scope_depth -= 1;
-
-        // Pop all local variables at the scope just ended
-        while !self.locals.is_empty() {
-            if let Some(last) = self.locals.last() {
-                if last.depth.unwrap() > self.scope_depth {
-                    self.locals_indices.entry(last.name).and_modify(|indices| {
-                        indices.pop();
-                    });
-                    self.locals.pop();
-
-                    // TODO: Add POPN instruction to pop n elements from the stack
-                    self.emit_byte(OpCode::Pop.into());
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn block(&mut self) {
-        while !self.check_token(TokenType::RightBrace) && !self.check_token(TokenType::Eof) {
-            self.declaration();
-        }
-
-        self.consume(TokenType::RightBrace, "Expect '}' after block.");
-    }
-
-    fn expression_statement(&mut self) {
-        self.expression();
-        self.consume(TokenType::Semicolon, "Expect ';' after expression.");
-        self.emit_byte(OpCode::Pop.into());
     }
 
     fn var_declaration(&mut self, is_let: bool) {
@@ -207,29 +272,21 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         }
     }
 
-    pub fn previous_identifier(&mut self) -> Value {
-        let name = &self.previous.as_ref().unwrap().lexeme.unwrap();
-        let vm = &mut self.vm;
-        create_string(vm, name).into()
-    }
-
-    pub fn identifier_constant(&mut self, name: Value) -> Result<usize, CompileError> {
-        let interned: InternedString = name.clone().try_into().unwrap();
-        match self.vm.globals_indices.get(&interned) {
-            Some(Value::Number(slot)) => Ok(*slot as usize),
-            None => {
-                if self.vm.globals.len() == U24_MAX as usize + 1 {
-                    return Err(CompileError::TooManyGlobals);
-                }
-
-                let slot = self.vm.globals.len();
-                self.vm.globals.push((name, Value::Undefined));
-                self.vm
-                    .globals_indices
-                    .insert(interned, (slot as f64).into());
-                Ok(slot)
-            }
-            _ => unimplemented!(),
+    fn statement(&mut self) {
+        if self.match_token(TokenType::Print) {
+            self.print_statement();
+        } else if self.match_token(TokenType::For) {
+            self.for_statement();
+        } else if self.match_token(TokenType::If) {
+            self.if_statement();
+        } else if self.match_token(TokenType::While) {
+            self.while_statement();
+        } else if self.match_token(TokenType::LeftBrace) {
+            self.begin_scope();
+            self.block();
+            self.end_scope();
+        } else {
+            self.expression_statement();
         }
     }
 
@@ -288,20 +345,6 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         indices.push(self.locals.len() - 1);
     }
 
-    pub fn resolve_local(&mut self, name: &str) -> Result<Option<usize>, CompileError> {
-        if let Some(locals_indices) = self.locals_indices.get(name) {
-            if let Some(index) = locals_indices.last() {
-                let local = &self.locals[*index];
-                if local.depth.is_none() {
-                    return Err(CompileError::UninitializedLocal);
-                }
-                return Ok(Some(*index));
-            }
-        }
-
-        Ok(None)
-    }
-
     fn define_variable(&mut self, slot: Option<usize>) {
         if self.scope_depth > 0 {
             self.mark_initialized();
@@ -321,6 +364,167 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         }
 
         self.locals.last_mut().unwrap().depth = Some(self.scope_depth);
+    }
+
+    fn print_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after value.");
+        self.emit_byte(OpCode::Print.into());
+    }
+
+    fn for_statement(&mut self) {
+        self.begin_scope();
+
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.");
+
+        // Compile initializer
+        if self.match_token(TokenType::Semicolon) {
+            // No initializer
+        } else if self.match_token(TokenType::Var) {
+            self.var_declaration(false);
+        } else {
+            self.expression_statement();
+        }
+
+        let mut loop_start = self.chunk.code.len();
+
+        let exit_jump = if !self.match_token(TokenType::Semicolon) {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after loop condition.");
+
+            let exit_jump = self.emit_jump(OpCode::JumpIfFalse.into());
+            // Pop 'condition' off the stack, before executing the body of the for
+            self.emit_byte(OpCode::Pop.into());
+            Some(exit_jump)
+        } else {
+            None
+        };
+
+        if !self.match_token(TokenType::RightParen) {
+            let body_jump = self.emit_jump(OpCode::Jump.into());
+
+            let increment_start = self.chunk.code.len();
+
+            self.expression();
+            self.emit_byte(OpCode::Pop.into());
+            self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
+
+            self.emit_loop(loop_start);
+            loop_start = increment_start;
+            self.patch_jump(body_jump);
+        }
+
+        // Compile for body
+        self.statement();
+        // After the body, add loop instruction to jump back to 'loop_start'
+        self.emit_loop(loop_start);
+
+        // If there was a condition, patch the exit jump
+        if let Some(exit_jump) = exit_jump {
+            self.patch_jump(exit_jump);
+            self.emit_byte(OpCode::Pop.into());
+        }
+
+        self.end_scope();
+    }
+
+    fn if_statement(&mut self) {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        // Insert jump after condition to skip to 'else' branch
+        let then_jump = self.emit_jump(OpCode::JumpIfFalse.into());
+
+        // Pop if 'condition' off the stack
+        self.emit_byte(OpCode::Pop.into());
+        // Compile 'then' branch
+        self.statement();
+        // Insert jump after 'then' branch to skip past 'else' branch
+        let else_jump = self.emit_jump(OpCode::Jump.into());
+
+        // Back patch 'then' jump offset, after 'then' branch and 'else' jump code is compiled
+        self.patch_jump(then_jump);
+
+        // Pop 'condition' off the stack, in case 'then' branch was jumped
+        self.emit_byte(OpCode::Pop.into());
+        // Compile 'else' branch, if any
+        if self.match_token(TokenType::Else) {
+            self.statement();
+        }
+
+        // Back patch 'else' jump offset, after 'else' branch code is compiled
+        self.patch_jump(else_jump);
+    }
+
+    fn while_statement(&mut self) {
+        // Marks beginning of while construct
+        let loop_start = self.chunk.code.len();
+
+        self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        let exit_jump = self.emit_jump(OpCode::JumpIfFalse.into());
+
+        // Pop while 'condition' off the stack
+        self.emit_byte(OpCode::Pop.into());
+        // Compile while body
+        self.statement();
+        // After the body, add loop instruction to jump back to 'loop_start'
+        self.emit_loop(loop_start);
+
+        // Back patch while 'exit' jump offset
+        self.patch_jump(exit_jump);
+        // Pop while 'condition' off the stack, when exiting if
+        self.emit_byte(OpCode::Pop.into());
+    }
+
+    fn block(&mut self) {
+        while !self.check_token(TokenType::RightBrace) && !self.check_token(TokenType::Eof) {
+            self.declaration();
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after block.");
+    }
+
+    fn expression_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after expression.");
+        self.emit_byte(OpCode::Pop.into());
+    }
+
+    fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        self.scope_depth -= 1;
+
+        // Pop all local variables at the scope just ended
+        while !self.locals.is_empty() {
+            if let Some(last) = self.locals.last() {
+                if last.depth.unwrap() > self.scope_depth {
+                    self.locals_indices.entry(last.name).and_modify(|indices| {
+                        indices.pop();
+                    });
+                    self.locals.pop();
+
+                    // TODO: Add POPN instruction to pop n elements from the stack
+                    self.emit_byte(OpCode::Pop.into());
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn check_token(&self, token_type: TokenType) -> bool {
+        self.current
+            .iter()
+            .all(|token| token.token_type == token_type)
     }
 
     fn synchronize(&mut self) {
@@ -345,21 +549,6 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
 
             self.advance();
         }
-    }
-
-    fn check_token(&self, token_type: TokenType) -> bool {
-        self.current
-            .iter()
-            .all(|token| token.token_type == token_type)
-    }
-
-    pub fn match_token(&mut self, token_type: TokenType) -> bool {
-        if !self.check_token(token_type) {
-            return false;
-        }
-
-        self.advance();
-        true
     }
 
     fn error_at_current(&mut self, message: &str, error: CompileError) {
@@ -396,46 +585,6 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         match self.first_error {
             Some(ce) => Err(ce),
             None => Ok(self.chunk),
-        }
-    }
-
-    pub fn emit_byte(&mut self, byte: u8) {
-        let line = self.previous.as_ref().unwrap().line;
-        self.chunk.write(byte, line);
-    }
-
-    pub fn emit_byte_with_line(&mut self, byte: u8, line: u32) {
-        self.chunk.write(byte, line);
-    }
-
-    pub fn emit_bytes(&mut self, byte1: u8, byte2: u8) {
-        self.emit_byte(byte1);
-        self.emit_byte(byte2);
-    }
-
-    pub fn emit_return(&mut self) {
-        self.emit_byte(OpCode::Return.into());
-    }
-
-    pub fn emit_constant(&mut self, value: Value) {
-        let line = self.previous.as_ref().unwrap().line;
-        if self.chunk.write_constant(value, line).is_err() {
-            let message: &str = &format!("{}", CompileError::TooManyConstants);
-            self.error(message, CompileError::TooManyConstants);
-        }
-    }
-
-    pub fn emit_variable(&mut self, op: OpCode, op_long: OpCode, slot: usize) {
-        if slot < u8::MAX as usize + 1 {
-            self.emit_bytes(op.into(), slot as u8);
-        } else {
-            // Emit "long" opcode and slot with 24 bit operand
-            self.emit_byte(op_long.into());
-            // Convert to "u24" from usize with little-endian ordering
-            let [a, b, c, ..] = slot.to_le_bytes();
-            self.emit_byte(a);
-            self.emit_byte(b);
-            self.emit_byte(c);
         }
     }
 }

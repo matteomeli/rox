@@ -53,6 +53,9 @@ pub(crate) fn disassemble_instruction(vm: &VM, chunk: &Chunk, offset: usize) -> 
             OpCode::Subtract => simple_instruction("SUBTRACT", offset),
             OpCode::Multiply => simple_instruction("MULTIPLY", offset),
             OpCode::Divide => simple_instruction("DIVIDE", offset),
+            OpCode::JumpIfFalse => jump_instruction("JUMP_IF_FALSE", chunk, offset, 1),
+            OpCode::Jump => jump_instruction("JUMP", chunk, offset, 1),
+            OpCode::Loop => jump_instruction("LOOP", chunk, offset, -1),
         },
         Err(_) => {
             println!("Unknown opcode {}", byte);
@@ -128,6 +131,18 @@ fn byte_long_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize {
     // TODO: This doesn't allow to track/debug the local name, only its slot
     println!("{}", slot);
     offset + 4
+}
+
+fn jump_instruction(name: &str, chunk: &Chunk, offset: usize, sign: isize) -> usize {
+    // Decode constant slot from "long" constant "u24" operand
+    let jump = u16::from_le_bytes([chunk.code[offset + 1], chunk.code[offset + 2]]) as isize;
+    println!(
+        "{:<16} {:<4} -> {:<4}",
+        name,
+        offset,
+        offset as isize + 3 + sign * jump
+    );
+    offset + 3
 }
 
 pub fn disassemble_chunk(vm: &VM, chunk: &Chunk, name: &str) {

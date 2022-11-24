@@ -34,6 +34,9 @@ pub enum OpCode {
     Subtract,
     Multiply,
     Divide,
+    JumpIfFalse,
+    Jump,
+    Loop,
 }
 
 pub struct LineStart {

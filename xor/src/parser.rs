@@ -104,7 +104,7 @@ impl ParseRule {
             },
             TokenType::Identifier => ParseRule {
                 prefix: Some(variable),
-                ..Default::default()
+                ..ParseRule::default()
             },
             TokenType::String => ParseRule {
                 prefix: Some(string),
@@ -114,12 +114,16 @@ impl ParseRule {
                 prefix: Some(number),
                 ..ParseRule::default()
             },
-            TokenType::And => ParseRule::default(),
+            TokenType::And => ParseRule {
+                infix: Some(and),
+                precedence: Precedence::And,
+                ..ParseRule::default()
+            },
             TokenType::Class => ParseRule::default(),
             TokenType::Else => ParseRule::default(),
             TokenType::False => ParseRule {
                 prefix: Some(literal),
-                ..Default::default()
+                ..ParseRule::default()
             },
             TokenType::For => ParseRule::default(),
             TokenType::Fun => ParseRule::default(),
@@ -127,16 +131,20 @@ impl ParseRule {
             TokenType::Let => ParseRule::default(),
             TokenType::Nil => ParseRule {
                 prefix: Some(literal),
-                ..Default::default()
+                ..ParseRule::default()
             },
-            TokenType::Or => ParseRule::default(),
+            TokenType::Or => ParseRule {
+                infix: Some(or),
+                precedence: Precedence::Or,
+                ..ParseRule::default()
+            },
             TokenType::Print => ParseRule::default(),
             TokenType::Return => ParseRule::default(),
             TokenType::Super => ParseRule::default(),
             TokenType::This => ParseRule::default(),
             TokenType::True => ParseRule {
                 prefix: Some(literal),
-                ..Default::default()
+                ..ParseRule::default()
             },
             TokenType::Var => ParseRule::default(),
             TokenType::While => ParseRule::default(),
@@ -205,9 +213,9 @@ fn binary(compiler: &mut Compiler, _can_assign: bool) {
         TokenType::BangEqual => compiler.emit_bytes(OpCode::Equal.into(), OpCode::Not.into()),
         TokenType::EqualEqual => compiler.emit_byte(OpCode::Equal.into()),
         TokenType::Greater => compiler.emit_byte(OpCode::Greater.into()),
-        TokenType::GreaterEqual => compiler.emit_bytes(OpCode::Greater.into(), OpCode::Not.into()),
+        TokenType::GreaterEqual => compiler.emit_bytes(OpCode::Less.into(), OpCode::Not.into()),
         TokenType::Less => compiler.emit_byte(OpCode::Less.into()),
-        TokenType::LessEqual => compiler.emit_bytes(OpCode::Less.into(), OpCode::Not.into()),
+        TokenType::LessEqual => compiler.emit_bytes(OpCode::Greater.into(), OpCode::Not.into()),
         TokenType::Plus => compiler.emit_byte(OpCode::Add.into()),
         TokenType::Minus => compiler.emit_byte(OpCode::Subtract.into()),
         TokenType::Star => compiler.emit_byte(OpCode::Multiply.into()),
@@ -281,4 +289,25 @@ fn variable(compiler: &mut Compiler, can_assign: bool) {
             }
         }
     }
+}
+
+fn and(compiler: &mut Compiler, _can_assign: bool) {
+    let end_jump = compiler.emit_jump(OpCode::JumpIfFalse.into());
+
+    compiler.emit_byte(OpCode::Pop.into());
+    compiler.parse_precedence(Precedence::And);
+
+    compiler.patch_jump(end_jump);
+}
+
+fn or(compiler: &mut Compiler, _can_assign: bool) {
+    let else_jump = compiler.emit_jump(OpCode::JumpIfFalse.into());
+    let end_jump = compiler.emit_jump(OpCode::Jump.into());
+
+    compiler.patch_jump(else_jump);
+
+    compiler.emit_byte(OpCode::Pop.into());
+    compiler.parse_precedence(Precedence::Or);
+
+    compiler.patch_jump(end_jump);
 }
