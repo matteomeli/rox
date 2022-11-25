@@ -579,7 +579,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         #[cfg(feature = "dump")]
         {
             if self.first_error.is_none() {
-                debug::disassemble_chunk(self.vm, &self.chunk, "code");
+                debug::disassemble_chunk(self.vm, &self.chunk, "program");
             }
         }
         match self.first_error {

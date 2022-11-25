@@ -153,7 +153,7 @@ impl VM {
 
         #[cfg(feature = "trace")]
         {
-            println!("Execution trace:");
+            println!("== trace ==");
         }
 
         self.ip = 0;
