@@ -29,9 +29,9 @@ type ParseFn = fn(&mut Compiler, bool);
 
 #[derive(Default)]
 pub struct ParseRule {
-    pub(crate) prefix: Option<ParseFn>,
-    pub(crate) infix: Option<ParseFn>,
-    pub(crate) precedence: Precedence,
+    pub prefix: Option<ParseFn>,
+    pub infix: Option<ParseFn>,
+    pub precedence: Precedence,
 }
 
 impl ParseRule {

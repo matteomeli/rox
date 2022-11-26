@@ -17,16 +17,16 @@ pub struct Local<'src> {
 }
 
 pub struct Compiler<'src, 'vm> {
-    pub(crate) vm: &'vm mut VM,
+    pub vm: &'vm mut VM,
     scanner: Scanner<'src>,
-    pub(crate) previous: Option<Token<'src>>,
+    pub previous: Option<Token<'src>>,
     current: Option<Token<'src>>,
     first_error: Option<CompileError>,
     panic_mode: bool,
-    pub(crate) chunk: Chunk,
+    pub chunk: Chunk,
     scope_depth: usize,
-    pub(crate) locals_indices: FnvHashMap<&'src str, Vec<usize>>,
-    pub(crate) locals: Vec<Local<'src>>,
+    pub locals_indices: FnvHashMap<&'src str, Vec<usize>>,
+    pub locals: Vec<Local<'src>>,
 }
 
 impl<'src, 'vm> Compiler<'src, 'vm> {
@@ -599,7 +599,7 @@ fn report_error(message: &str, token: &Token) {
     eprintln!(": {}", message);
 }
 
-pub(crate) fn compile(vm: &mut VM, source: &str) -> CompilerResult {
+pub fn compile(vm: &mut VM, source: &str) -> CompilerResult {
     let scanner = Scanner::new(source);
     let mut compiler = Compiler::new(vm, scanner);
     compiler.advance();

@@ -113,11 +113,11 @@ fn rt(re: RuntimeError) -> InterpretResult {
 #[derive(Default)]
 pub struct VM {
     ip: usize,
-    pub(crate) stack: Vec<Value>,
-    pub(crate) strings: FnvHashSet<InternedString>,
-    pub(crate) globals_indices: FnvHashMap<InternedString, Value>, // Associates an index in 'globals' for each global variable identifier
-    pub(crate) globals: Vec<(Value, Value)>, // Packs a (name, value) pair for each global variable
-    pub(crate) lets: FnvHashMap<InternedString, bool>, // Stores variables declared by let that can be assigned only once
+    pub stack: Vec<Value>,
+    pub strings: FnvHashSet<InternedString>,
+    pub globals_indices: FnvHashMap<InternedString, Value>, // Associates an index in 'globals' for each global variable identifier
+    pub globals: Vec<(Value, Value)>, // Packs a (name, value) pair for each global variable
+    pub lets: FnvHashMap<InternedString, bool>, // Stores variables declared by let that can be assigned only once
 }
 
 #[allow(dead_code)]

@@ -52,9 +52,9 @@ impl LineStart {
 
 #[derive(Default)]
 pub struct Chunk {
-    pub(crate) code: Vec<u8>,
-    pub(crate) constants: Vec<Value>,
-    pub(crate) lines: Vec<LineStart>,
+    pub code: Vec<u8>,
+    pub constants: Vec<Value>,
+    pub lines: Vec<LineStart>,
 }
 
 impl Chunk {

@@ -70,9 +70,9 @@ impl TokenType {
 }
 
 pub struct Token<'a> {
-    pub(crate) token_type: TokenType,
-    pub(crate) lexeme: Option<&'a str>,
-    pub(crate) line: u32,
+    pub token_type: TokenType,
+    pub lexeme: Option<&'a str>,
+    pub line: u32,
 }
 
 impl<'a> Token<'a> {

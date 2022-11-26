@@ -4,7 +4,7 @@ use crate::{
 };
 use std::convert::TryFrom;
 
-pub(crate) fn disassemble_instruction(vm: &VM, chunk: &Chunk, offset: usize) -> usize {
+pub fn disassemble_instruction(vm: &VM, chunk: &Chunk, offset: usize) -> usize {
     print!("{:04} ", offset);
     let line = chunk
         .get_line(offset)
