@@ -1,19 +1,64 @@
 use fnv::FnvHashMap;
 
+#[allow(unused_imports)]
 use crate::{
     chunk::{Chunk, OpCode, U24_MAX},
     debug,
     parser::{get_rule, Precedence},
     scanner::{Scanner, Token, TokenType},
-    value::{create_string, InternedString, Value},
-    vm::{CompileError, VM},
+    value::{create_string, format_function_name, Function, FunctionType, InternedString, Value},
+    vm::{manage, CompileError, VM},
 };
 
-type CompilerResult = Result<Chunk, CompileError>;
+type CompilerResult = Result<Function, CompileError>;
 
 pub struct Local<'src> {
     pub name: &'src str,
     pub depth: Option<usize>,
+}
+
+pub struct FunctionCompiler<'src> {
+    function: Function,
+    function_type: FunctionType,
+    pub locals_indices: FnvHashMap<&'src str, Vec<usize>>,
+    pub locals: Vec<Local<'src>>,
+    scope_depth: usize,
+    enclosing: Option<Box<FunctionCompiler<'src>>>,
+}
+
+impl<'src> FunctionCompiler<'src> {
+    pub fn new(vm: &mut VM, function_type: FunctionType) -> Self {
+        let function = Function::new(vm, None, 0);
+        let locals = vec![Local {
+            name: "",
+            depth: Some(0),
+        }];
+        let mut locals_indices = FnvHashMap::default();
+        locals_indices.insert("", vec![0]);
+
+        FunctionCompiler {
+            function,
+            function_type,
+            locals_indices,
+            locals,
+            scope_depth: 0,
+            enclosing: None,
+        }
+    }
+
+    pub fn resolve_local(&mut self, name: &str) -> Result<Option<usize>, CompileError> {
+        if let Some(locals_indices) = self.locals_indices.get(name) {
+            if let Some(index) = locals_indices.last() {
+                let local = &self.locals[*index];
+                if local.depth.is_none() {
+                    return Err(CompileError::UninitializedLocal);
+                }
+                return Ok(Some(*index));
+            }
+        }
+
+        Ok(None)
+    }
 }
 
 pub struct Compiler<'src, 'vm> {
@@ -23,14 +68,12 @@ pub struct Compiler<'src, 'vm> {
     current: Option<Token<'src>>,
     first_error: Option<CompileError>,
     panic_mode: bool,
-    pub chunk: Chunk,
-    scope_depth: usize,
-    pub locals_indices: FnvHashMap<&'src str, Vec<usize>>,
-    pub locals: Vec<Local<'src>>,
+    pub fc: FunctionCompiler<'src>,
 }
 
 impl<'src, 'vm> Compiler<'src, 'vm> {
     pub fn new(vm: &'vm mut VM, scanner: Scanner<'src>) -> Self {
+        let fc = FunctionCompiler::new(vm, FunctionType::Script);
         Compiler {
             vm,
             scanner,
@@ -38,10 +81,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
             current: None,
             first_error: None,
             panic_mode: false,
-            chunk: Chunk::default(),
-            scope_depth: 0,
-            locals_indices: FnvHashMap::default(),
-            locals: Vec::default(),
+            fc,
         }
     }
 
@@ -92,6 +132,12 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         }
     }
 
+    pub fn check_token(&self, token_type: TokenType) -> bool {
+        self.current
+            .iter()
+            .all(|token| token.token_type == token_type)
+    }
+
     pub fn match_token(&mut self, token_type: TokenType) -> bool {
         if !self.check_token(token_type) {
             return false;
@@ -113,9 +159,8 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
     }
 
     pub fn previous_identifier(&mut self) -> Value {
-        let name = &self.previous.as_ref().unwrap().lexeme.unwrap();
-        let vm = &mut self.vm;
-        create_string(vm, name).into()
+        let name = self.previous.as_ref().unwrap().lexeme.unwrap();
+        create_string(self.vm, name).into()
     }
 
     pub fn identifier_constant(&mut self, name: Value) -> Result<usize, CompileError> {
@@ -138,27 +183,33 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         }
     }
 
-    pub fn resolve_local(&mut self, name: &str) -> Result<Option<usize>, CompileError> {
-        if let Some(locals_indices) = self.locals_indices.get(name) {
-            if let Some(index) = locals_indices.last() {
-                let local = &self.locals[*index];
-                if local.depth.is_none() {
-                    return Err(CompileError::UninitializedLocal);
+    pub fn argument_list(&mut self) -> usize {
+        let mut arg_count = 0;
+        if !self.check_token(TokenType::RightParen) {
+            loop {
+                self.expression();
+                if arg_count == 255 {
+                    self.short_error(CompileError::TooManyArguments)
                 }
-                return Ok(Some(*index));
+                arg_count += 1;
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
             }
         }
 
-        Ok(None)
+        self.consume(TokenType::RightParen, "Expected ')' after arguments.");
+
+        arg_count
     }
 
     pub fn emit_byte(&mut self, byte: u8) {
         let line = self.previous.as_ref().unwrap().line;
-        self.chunk.write(byte, line);
+        self.current_chunk_mut().write(byte, line);
     }
 
     pub fn emit_byte_with_line(&mut self, byte: u8, line: u32) {
-        self.chunk.write(byte, line);
+        self.current_chunk_mut().write(byte, line);
     }
 
     pub fn emit_bytes(&mut self, byte1: u8, byte2: u8) {
@@ -167,12 +218,17 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
     }
 
     pub fn emit_return(&mut self) {
+        self.emit_byte(OpCode::Nil.into());
         self.emit_byte(OpCode::Return.into());
     }
 
     pub fn emit_constant(&mut self, value: Value) {
         let line = self.previous.as_ref().unwrap().line;
-        if self.chunk.write_constant(value, line).is_err() {
+        if self
+            .current_chunk_mut()
+            .write_constant(value, line)
+            .is_err()
+        {
             let message: &str = &format!("{}", CompileError::TooManyConstants);
             self.error(message, CompileError::TooManyConstants);
         }
@@ -196,11 +252,11 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         self.emit_byte(instruction);
         self.emit_byte(0xff_u8);
         self.emit_byte(0xff_u8);
-        self.chunk.code.len() - 2
+        self.current_chunk_mut().code.len() - 2
     }
 
     pub fn patch_jump(&mut self, offset: usize) {
-        let code = &mut self.chunk.code;
+        let code = &mut self.current_chunk_mut().code;
         let jump = code.len() - offset - 2;
 
         if jump > u16::MAX as usize {
@@ -216,7 +272,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
     pub fn emit_loop(&mut self, loop_start: usize) {
         self.emit_byte(OpCode::Loop.into());
 
-        let offset = self.chunk.code.len() - loop_start + 2;
+        let offset = self.current_chunk_mut().code.len() - loop_start + 2;
         if offset > u16::MAX as usize {
             self.short_error(CompileError::TooFarToJump);
             return;
@@ -227,8 +283,37 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         self.emit_byte(b);
     }
 
+    pub fn error_at_current(&mut self, message: &str, error: CompileError) {
+        if self.panic_mode {
+            return;
+        }
+        report_error(message, self.current.as_ref().unwrap());
+        self.first_error = self.first_error.or(Some(error));
+        self.panic_mode = true;
+    }
+
+    pub fn short_error_at_current(&mut self, error: CompileError) {
+        self.error_at_current(&error.to_string(), error);
+    }
+
+    pub fn error(&mut self, message: &str, error: CompileError) {
+        if self.panic_mode {
+            return;
+        }
+        report_error(message, self.previous.as_ref().unwrap());
+        self.first_error = Some(error);
+        self.first_error = self.first_error.or(Some(error));
+        self.panic_mode = true;
+    }
+
+    pub fn short_error(&mut self, error: CompileError) {
+        self.error(&error.to_string(), error);
+    }
+
     fn declaration(&mut self) {
-        if self.match_token(TokenType::Var) {
+        if self.match_token(TokenType::Fun) {
+            self.fun_declaration();
+        } else if self.match_token(TokenType::Var) {
             self.var_declaration(false);
         } else if self.match_token(TokenType::Let) {
             self.var_declaration(true);
@@ -243,12 +328,12 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
 
     fn var_declaration(&mut self, is_let: bool) {
         match self.parse_variable("Expect variable name.", is_let) {
-            Err(e) => self.error(&format!("{}", e), e),
+            Err(ce) => self.error(&format!("{}", ce), ce),
             Ok(slot) => {
                 let identifier = self.previous_identifier();
                 if self.match_token(TokenType::Equal) {
                     // Disallow assignments to let variables after the first one
-                    let interned: InternedString = identifier.clone().try_into().unwrap();
+                    let interned: InternedString = identifier.try_into().unwrap();
                     if let Some(was_assigned) = self.vm.lets.get_mut(&interned) {
                         if *was_assigned {
                             self.short_error(CompileError::LetReassignment);
@@ -279,6 +364,8 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
             self.for_statement();
         } else if self.match_token(TokenType::If) {
             self.if_statement();
+        } else if self.match_token(TokenType::Return) {
+            self.return_statement();
         } else if self.match_token(TokenType::While) {
             self.while_statement();
         } else if self.match_token(TokenType::LeftBrace) {
@@ -299,7 +386,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
 
         let identifier = self.previous_identifier();
         self.declare_variable(identifier.clone(), is_let);
-        if self.scope_depth == 0 {
+        if self.fc.scope_depth == 0 {
             return self.identifier_constant(identifier).map(Some);
         }
 
@@ -307,13 +394,13 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
     }
 
     fn declare_variable(&mut self, name: Value, is_let: bool) {
-        if self.scope_depth > 0 {
+        if self.fc.scope_depth > 0 {
             let name = self.previous.as_ref().unwrap().lexeme.unwrap();
-            if let Some(locals_indices) = self.locals_indices.get(name) {
+            if let Some(locals_indices) = self.fc.locals_indices.get(name) {
                 if let Some(index) = locals_indices.last() {
-                    let local = &self.locals[*index];
+                    let local = &self.fc.locals[*index];
                     if let Some(depth) = local.depth {
-                        if depth == self.scope_depth {
+                        if depth == self.fc.scope_depth {
                             self.short_error(CompileError::DuplicateName);
                             return;
                         }
@@ -326,27 +413,28 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
 
         // Mark a variable as let-declared to reason about assignment
         if is_let {
-            let name_interned: InternedString = name.clone().try_into().unwrap();
+            let name_interned: InternedString = name.try_into().unwrap();
             self.vm.lets.insert(name_interned, false);
         }
     }
 
     fn add_local(&mut self, name: &'src str) {
-        if self.locals.len() == U24_MAX as usize + 1 {
+        if self.fc.locals.len() == U24_MAX as usize + 1 {
             self.short_error(CompileError::TooManyLocals);
             return;
         }
 
-        self.locals.push(Local { name, depth: None });
+        self.fc.locals.push(Local { name, depth: None });
         let indices = self
+            .fc
             .locals_indices
             .entry(name)
-            .or_insert_with(|| Vec::default());
-        indices.push(self.locals.len() - 1);
+            .or_insert_with(Vec::default);
+        indices.push(self.fc.locals.len() - 1);
     }
 
     fn define_variable(&mut self, slot: Option<usize>) {
-        if self.scope_depth > 0 {
+        if self.fc.scope_depth > 0 {
             self.mark_initialized();
             return;
         }
@@ -359,11 +447,11 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
     }
 
     fn mark_initialized(&mut self) {
-        if self.scope_depth == 0 {
+        if self.fc.scope_depth == 0 {
             return;
         }
 
-        self.locals.last_mut().unwrap().depth = Some(self.scope_depth);
+        self.fc.locals.last_mut().unwrap().depth = Some(self.fc.scope_depth);
     }
 
     fn print_statement(&mut self) {
@@ -386,7 +474,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
             self.expression_statement();
         }
 
-        let mut loop_start = self.chunk.code.len();
+        let mut loop_start = self.current_chunk_mut().code.len();
 
         let exit_jump = if !self.match_token(TokenType::Semicolon) {
             self.expression();
@@ -403,7 +491,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         if !self.match_token(TokenType::RightParen) {
             let body_jump = self.emit_jump(OpCode::Jump.into());
 
-            let increment_start = self.chunk.code.len();
+            let increment_start = self.current_chunk_mut().code.len();
 
             self.expression();
             self.emit_byte(OpCode::Pop.into());
@@ -459,7 +547,7 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
 
     fn while_statement(&mut self) {
         // Marks beginning of while construct
-        let loop_start = self.chunk.code.len();
+        let loop_start = self.current_chunk_mut().code.len();
 
         self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
         self.expression();
@@ -480,6 +568,21 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         self.emit_byte(OpCode::Pop.into());
     }
 
+    fn return_statement(&mut self) {
+        if self.fc.function_type == FunctionType::Script {
+            self.short_error(CompileError::ReturnAtTopLevel);
+            return;
+        }
+
+        if self.match_token(TokenType::Semicolon) {
+            self.emit_return();
+        } else {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after return value.");
+            self.emit_byte(OpCode::Return.into());
+        }
+    }
+
     fn block(&mut self) {
         while !self.check_token(TokenType::RightBrace) && !self.check_token(TokenType::Eof) {
             self.declaration();
@@ -494,21 +597,98 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         self.emit_byte(OpCode::Pop.into());
     }
 
+    fn fun_declaration(&mut self) {
+        match self.parse_variable("Expect function name.", false) {
+            Err(ce) => self.error(&format!("{}", ce), ce),
+            Ok(global) => {
+                self.mark_initialized();
+                self.function(FunctionType::Function);
+                self.define_variable(global);
+            }
+        }
+    }
+
+    fn function(&mut self, function_type: FunctionType) {
+        self.begin_compiler(function_type);
+        self.begin_scope();
+
+        self.consume(TokenType::LeftParen, "Expect '(' after function name.");
+        // TODO: Parse function parameters
+        if !self.check_token(TokenType::RightParen) {
+            loop {
+                self.fc.function.arity += 1;
+                if self.fc.function.arity > 255 {
+                    self.short_error_at_current(CompileError::TooManyParameters);
+                }
+
+                match self.parse_variable("Expect parameter name.", false) {
+                    Err(ce) => {
+                        self.error(&format!("{}", ce), ce);
+                        break;
+                    }
+                    Ok(constant) => self.define_variable(constant),
+                }
+
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after parameters.");
+        self.consume(TokenType::LeftBrace, "Expect '{' before function body.");
+
+        self.block();
+
+        let function = self.end_compiler();
+        let function_value = manage(self.vm, function).into();
+        self.emit_constant(function_value);
+    }
+
+    fn begin_compiler(&mut self, function_type: FunctionType) {
+        let new_compiler = FunctionCompiler::new(self.vm, function_type);
+        let old_compiler = std::mem::replace(&mut self.fc, new_compiler);
+        self.fc.enclosing = Some(Box::new(old_compiler));
+
+        if function_type != FunctionType::Script {
+            let function_name = self.previous.as_ref().unwrap().lexeme.unwrap();
+            self.fc.function.name = Some(create_string(self.vm, function_name));
+        }
+    }
+
+    fn end_compiler(&mut self) -> Function {
+        self.emit_return();
+
+        #[cfg(feature = "dump")]
+        {
+            if self.first_error.is_none() {
+                let function_name = format_function_name(&self.fc.function);
+                debug::disassemble_chunk(self.vm, &self.fc.function.chunk, &function_name);
+            }
+        }
+
+        let new_compiler = *self.fc.enclosing.take().unwrap();
+        let old_compiler = std::mem::replace(&mut self.fc, new_compiler);
+        old_compiler.function
+    }
+
     fn begin_scope(&mut self) {
-        self.scope_depth += 1;
+        self.fc.scope_depth += 1;
     }
 
     fn end_scope(&mut self) {
-        self.scope_depth -= 1;
+        self.fc.scope_depth -= 1;
 
         // Pop all local variables at the scope just ended
-        while !self.locals.is_empty() {
-            if let Some(last) = self.locals.last() {
-                if last.depth.unwrap() > self.scope_depth {
-                    self.locals_indices.entry(last.name).and_modify(|indices| {
-                        indices.pop();
-                    });
-                    self.locals.pop();
+        while !self.fc.locals.is_empty() {
+            if let Some(last) = self.fc.locals.last() {
+                if last.depth.unwrap() > self.fc.scope_depth {
+                    self.fc
+                        .locals_indices
+                        .entry(last.name)
+                        .and_modify(|indices| {
+                            indices.pop();
+                        });
+                    self.fc.locals.pop();
 
                     // TODO: Add POPN instruction to pop n elements from the stack
                     self.emit_byte(OpCode::Pop.into());
@@ -519,12 +699,6 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
                 break;
             }
         }
-    }
-
-    fn check_token(&self, token_type: TokenType) -> bool {
-        self.current
-            .iter()
-            .all(|token| token.token_type == token_type)
     }
 
     fn synchronize(&mut self) {
@@ -551,41 +725,25 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
         }
     }
 
-    fn error_at_current(&mut self, message: &str, error: CompileError) {
-        if self.panic_mode {
-            return;
-        }
-        report_error(message, self.current.as_ref().unwrap());
-        self.first_error = self.first_error.or(Some(error));
-        self.panic_mode = true;
-    }
-
-    fn error(&mut self, message: &str, error: CompileError) {
-        if self.panic_mode {
-            return;
-        }
-        report_error(message, self.previous.as_ref().unwrap());
-        self.first_error = Some(error);
-        self.first_error = self.first_error.or(Some(error));
-        self.panic_mode = true;
-    }
-
-    pub fn short_error(&mut self, error: CompileError) {
-        self.error(&error.to_string(), error);
-    }
-
     fn end(mut self) -> CompilerResult {
         self.emit_return();
+
         #[cfg(feature = "dump")]
         {
             if self.first_error.is_none() {
-                debug::disassemble_chunk(self.vm, &self.chunk, "program");
+                let function_name = format_function_name(&self.fc.function);
+                debug::disassemble_chunk(self.vm, &self.fc.function.chunk, &function_name);
             }
         }
+
         match self.first_error {
             Some(ce) => Err(ce),
-            None => Ok(self.chunk),
+            None => Ok(self.fc.function),
         }
+    }
+
+    fn current_chunk_mut(&mut self) -> &mut Chunk {
+        &mut self.fc.function.chunk
     }
 }
 

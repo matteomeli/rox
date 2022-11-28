@@ -1,11 +1,14 @@
-use std::fmt;
+use std::{fmt, rc::Rc};
 
 use fnv::{FnvHashMap, FnvHashSet};
 
 use crate::{
     chunk::{Chunk, OpCode},
     compiler,
-    value::{create_string, InternedString, Value},
+    value::{
+        create_string, Function, InternedString, NativeFn, NativeFunction, ObjectRef, ObjectRoot,
+        Value,
+    },
 };
 
 #[cfg(feature = "trace")]
@@ -14,10 +17,13 @@ use crate::debug;
 #[derive(Debug, Clone)]
 pub enum RuntimeError {
     StackUnderflow,
+    StackOverflow,
     TypeError(&'static str, String, bool),
     UnknownOpCode,
     InvalidAddition(String, String),
     UndefinedVariable(String),
+    NotCallable,
+    WrongArity(usize, usize),
 }
 
 impl fmt::Display for RuntimeError {
@@ -25,10 +31,11 @@ impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::StackUnderflow => write!(f, "Stack underflow."),
+            Self::StackOverflow => write!(f, "Stack overflow"),
             Self::TypeError(expected, actual, is_plural) => {
                 #[cfg(not(feature = "lox_errors"))]
                 {
-                    write!(f, "Expected a {} value but found {}.", t, v)
+                    write!(f, "Expected a {} value but found {}.", expected, actual)
                 }
                 #[cfg(feature = "lox_errors")]
                 {
@@ -51,6 +58,10 @@ impl fmt::Display for RuntimeError {
                 }
             }
             Self::UndefinedVariable(name) => write!(f, "Undefined variable '{}'.", name),
+            Self::NotCallable => write!(f, "Can only call functions and classes."),
+            Self::WrongArity(expected, actual) => {
+                write!(f, "Expected {} arguments but got {}.", expected, actual)
+            }
         }
     }
 }
@@ -66,6 +77,9 @@ pub enum CompileError {
     TooManyGlobals,
     TooFarToJump,
     TooFarToLoop,
+    TooManyParameters,
+    TooManyArguments,
+    ReturnAtTopLevel,
 }
 
 impl fmt::Display for CompileError {
@@ -84,6 +98,9 @@ impl fmt::Display for CompileError {
             Self::TooManyGlobals => write!(f, "Too many global variables."),
             Self::TooFarToJump => write!(f, "Too much code to jump over."),
             Self::TooFarToLoop => write!(f, "Loop body too large."),
+            Self::TooManyParameters => write!(f, "Can't have more than 255 parameters."),
+            Self::TooManyArguments => write!(f, "Can't have more than 255 arguments."),
+            Self::ReturnAtTopLevel => write!(f, "Can't return from top-level code."),
         }
     }
 }
@@ -110,29 +127,56 @@ fn rt(re: RuntimeError) -> InterpretResult {
     Err(VMError::RuntimeError(re))
 }
 
+// This trait marks any object managed by the VM
+pub trait Object {}
+
+pub struct CallFrame {
+    function: ObjectRoot<Function>,
+    ip_offset: usize,
+    base: usize,
+}
+
 #[derive(Default)]
 pub struct VM {
     ip: usize,
     pub stack: Vec<Value>,
     pub strings: FnvHashSet<InternedString>,
+    pub objects: Vec<Box<dyn Object>>,
     pub globals_indices: FnvHashMap<InternedString, Value>, // Associates an index in 'globals' for each global variable identifier
     pub globals: Vec<(Value, Value)>, // Packs a (name, value) pair for each global variable
     pub lets: FnvHashMap<InternedString, bool>, // Stores variables declared by let that can be assigned only once
+    frames: Vec<CallFrame>,
 }
 
 #[allow(dead_code)]
 impl VM {
     pub fn interpret(&mut self, source: &str) -> InterpretResult {
-        let chunk = compiler::compile(self, source).map_err(VMError::CompileError)?;
-        let result = self.run(&chunk);
+        // Parse top-level function
+        let function = compiler::compile(self, source).map_err(VMError::CompileError)?;
+        // Push function object on the stack
+        let function_ref = manage(self, function);
+        self.stack.push(Value::Function(function_ref.clone()));
+
+        // Add call frame for root function
+        self.call(function_ref, 0)?;
+
+        let result = self.run();
         if let Err(VMError::RuntimeError(ref re)) = result {
             eprintln!("{}", re);
-            if let Some(n) = chunk.get_line(self.ip - 1) {
-                eprint!("[line {}] in ", n);
-            } else {
-                eprint!("[unknown line] in ");
+
+            // Callstack
+            for frame in self.frames.iter().rev() {
+                let fun = &frame.function;
+                if let Some(n) = fun.chunk.get_line(frame.ip_offset) {
+                    eprint!("[line {}] in ", n);
+                } else {
+                    eprint!("[unknown line] in ");
+                }
+                match &fun.name {
+                    None => eprintln!("script"),
+                    Some(string_ref) => eprintln!("{}()", string_ref.upgrade().unwrap()),
+                }
             }
-            eprintln!("script");
 
             self.stack.clear();
         }
@@ -141,7 +185,7 @@ impl VM {
     }
 
     #[allow(clippy::single_match)]
-    fn run(&mut self, chunk: &Chunk) -> InterpretResult {
+    fn run(&mut self) -> InterpretResult {
         macro_rules! binary_op {
             ($op:tt) => {{
                 // TODO: Optimise like NEGATE, removing one pop and apply the operation in place
@@ -156,6 +200,8 @@ impl VM {
             println!("== trace ==");
         }
 
+        // Extract root function and main bytecode chunk
+        let mut function_root = self.frames.last().unwrap().function.clone();
         self.ip = 0;
 
         loop {
@@ -170,9 +216,10 @@ impl VM {
                     }
                 }
                 println!();
-                debug::disassemble_instruction(self, chunk, self.ip);
+                debug::disassemble_instruction(self, &function_root.chunk, self.ip);
             }
 
+            let chunk = &function_root.chunk;
             let byte = chunk.code[self.ip];
             self.ip += 1;
             match OpCode::try_from(byte) {
@@ -218,7 +265,8 @@ impl VM {
                         } else {
                             self.read_u24(chunk) as usize
                         };
-                        self.stack.push(self.stack[slot as usize].clone());
+                        let frame = self.frames.last().unwrap();
+                        self.stack.push(self.stack[slot + frame.base].clone());
                     }
                     OpCode::SetLocal | OpCode::SetLocalLong => {
                         let slot = if instruction == OpCode::SetLocal {
@@ -226,7 +274,8 @@ impl VM {
                         } else {
                             self.read_u24(chunk) as usize
                         };
-                        self.stack[slot as usize] = self.peek_stack(0);
+                        let frame = self.frames.last().unwrap();
+                        self.stack[slot + frame.base] = self.peek_stack(0);
                     }
                     OpCode::Pop => {
                         self.pop_stack()?;
@@ -236,7 +285,21 @@ impl VM {
                         println!("{}", value);
                     }
                     OpCode::Return => {
-                        return Ok(());
+                        let result = self.pop_stack()?;
+                        let stack_top = self.frames.last().unwrap().base;
+                        self.frames.pop();
+                        match self.frames.last() {
+                            None => {
+                                self.pop_stack()?;
+                                return Ok(());
+                            }
+                            Some(frame) => {
+                                self.stack.truncate(stack_top);
+                                self.stack.push(result);
+                                function_root = frame.function.clone();
+                                self.ip = frame.ip_offset;
+                            }
+                        }
                     }
                     OpCode::Constant => {
                         let constant = self.read_constant(chunk);
@@ -294,8 +357,8 @@ impl VM {
                         match (&b, &a) {
                             (Value::Number(b), Value::Number(a)) => self.stack.push((a + b).into()),
                             (Value::String(b), Value::String(a)) => {
-                                let a = &a.upgrade().unwrap().content;
-                                let b = &b.upgrade().unwrap().content;
+                                let a = &a.upgrade().unwrap();
+                                let b = &b.upgrade().unwrap();
                                 let s = create_string(self, &format!("{}{}", a, b));
                                 self.stack.push(s.into())
                             }
@@ -324,9 +387,22 @@ impl VM {
                         let offset = self.read_short(chunk) as usize;
                         self.ip -= offset;
                     }
+                    OpCode::Call => {
+                        let arg_count = self.read(chunk) as usize;
+                        self.frames.last_mut().unwrap().ip_offset = self.ip;
+                        let old_frame_count = self.frames.len();
+                        self.call_value(self.peek_stack(arg_count), arg_count)?;
+                        if self.frames.len() > old_frame_count {
+                            function_root = self.frames.last_mut().unwrap().function.clone();
+                            self.ip = 0;
+                        }
+                    }
                 },
                 Err(_) => return rt(RuntimeError::UnknownOpCode),
             }
+
+            // Update current frame ip pointer
+            self.frames.last_mut().unwrap().ip_offset = self.ip;
         }
     }
 
@@ -381,4 +457,56 @@ impl VM {
         self.ip += 3;
         slot
     }
+
+    fn call_value(&mut self, callee: Value, arg_count: usize) -> InterpretResult {
+        match callee {
+            Value::Function(function) => self.call(function, arg_count),
+            Value::NativeFunction(native_function) => {
+                let args = &self.stack[self.stack.len() - arg_count..];
+                let result = (native_function.upgrade().unwrap().function)(arg_count, args);
+                self.stack.truncate(self.stack.len() - arg_count - 1);
+                self.stack.push(result);
+                Ok(())
+            }
+            _ => rt(RuntimeError::NotCallable),
+        }
+    }
+
+    fn call(&mut self, function: ObjectRef<Function>, arg_count: usize) -> InterpretResult {
+        let function = function.upgrade().unwrap();
+        if arg_count != function.arity {
+            return rt(RuntimeError::WrongArity(function.arity, arg_count));
+        }
+        if self.frames.len() == 64 {
+            return rt(RuntimeError::StackOverflow);
+        }
+
+        let call_frame = CallFrame {
+            function,
+            ip_offset: 0,
+            base: self.stack.len() - arg_count - 1,
+        };
+        self.frames.push(call_frame);
+        Ok(())
+    }
+
+    pub fn define_native(&mut self, name: &str, function: NativeFn) {
+        let name: Value = create_string(self, name).into();
+        let name_interned: InternedString = name.clone().try_into().unwrap();
+        let value = Value::NativeFunction(manage(self, NativeFunction::new(function)));
+        let slot = self.globals.len();
+        self.globals.push((name, value));
+        self.globals_indices
+            .insert(name_interned, (slot as f64).into());
+    }
+}
+
+pub fn manage<T: 'static>(vm: &mut VM, object: T) -> ObjectRef<T>
+where
+    ObjectRoot<T>: Object,
+{
+    let object_root = Rc::new(object);
+    let object_ref = Rc::downgrade(&object_root);
+    vm.objects.push(Box::new(object_root));
+    object_ref
 }

@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["trace", "dump", "lox_errors"]
+default = []
+debug = ["trace", "dump", "lox_errors"]
 trace = []
 dump = []
 lox_errors = []

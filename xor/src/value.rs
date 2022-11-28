@@ -5,10 +5,19 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use crate::vm::{RuntimeError, VMError, VM};
+use crate::{
+    chunk::Chunk,
+    vm::{Object, RuntimeError, VMError, VM},
+};
 
-pub type ObjRoot<T> = Rc<Obj<T>>;
-pub type ObjRef<T> = Weak<Obj<T>>;
+pub type ObjectRoot<T> = Rc<T>;
+pub type ObjectRef<T> = Weak<T>;
+
+impl Object for ObjectRoot<String> {}
+
+impl Object for ObjectRoot<Function> {}
+
+impl Object for ObjectRoot<NativeFunction> {}
 
 #[derive(Clone)]
 pub enum Value {
@@ -16,7 +25,9 @@ pub enum Value {
     Nil,
     Undefined,
     Number(f64),
-    String(ObjRef<String>),
+    String(ObjectRef<String>),
+    Function(ObjectRef<Function>),
+    NativeFunction(ObjectRef<NativeFunction>),
 }
 
 impl PartialEq for Value {
@@ -54,9 +65,15 @@ impl From<bool> for Value {
     }
 }
 
-impl From<ObjRef<String>> for Value {
-    fn from(o: ObjRef<String>) -> Self {
+impl From<ObjectRef<String>> for Value {
+    fn from(o: ObjectRef<String>) -> Self {
         Value::String(o)
+    }
+}
+
+impl From<ObjectRef<Function>> for Value {
+    fn from(o: ObjectRef<Function>) -> Self {
+        Value::Function(o)
     }
 }
 
@@ -83,8 +100,8 @@ impl TryFrom<Value> for String {
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
             Value::String(obj_ref) => {
-                let s = &obj_ref.upgrade().unwrap().content;
-                Ok(s.clone())
+                let s = obj_ref.upgrade().unwrap();
+                Ok((*s).clone())
             }
             _ => Err(VMError::RuntimeError(RuntimeError::TypeError(
                 "string",
@@ -107,33 +124,29 @@ impl Display for Value {
                     write!(f, "{}", n)
                 }
             }
-            Self::String(s) => write!(f, "{}", to_string(s)),
+            Self::String(s) => write!(f, "{}", format_string(s)),
             Self::Undefined => write!(f, "undefined"),
+            Self::Function(fun) => {
+                write!(f, "{}", format_funcion(fun))
+            }
+            Self::NativeFunction(_) => {
+                write!(f, "<native fn>")
+            }
         }
     }
 }
 
-/// A struct that wraps heap stored Ts
-pub struct Obj<T> {
-    pub content: T,
-}
-
-fn to_string(obj: &ObjRef<String>) -> String {
-    let s = &obj.upgrade().unwrap().content;
-    format!("\"{}\"", s)
-}
-
-pub struct InternedString(pub ObjRoot<String>);
+pub struct InternedString(pub ObjectRoot<String>);
 
 impl Hash for InternedString {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.content.hash(state);
+        self.0.hash(state);
     }
 }
 
 impl PartialEq for InternedString {
     fn eq(&self, other: &Self) -> bool {
-        self.0.content == other.0.content
+        self.0 == other.0
     }
 }
 
@@ -141,7 +154,7 @@ impl Eq for InternedString {}
 
 impl Borrow<str> for InternedString {
     fn borrow(&self) -> &str {
-        self.0.content.borrow()
+        (*self.0).borrow()
     }
 }
 
@@ -160,18 +173,82 @@ impl TryFrom<Value> for InternedString {
     }
 }
 
-pub fn create_string(vm: &mut VM, s: &str) -> ObjRef<String> {
-    match vm.strings.get(s) {
+fn format_string(string_ref: &ObjectRef<String>) -> String {
+    let s = &string_ref.upgrade().unwrap();
+    format!("\"{}\"", s)
+}
+
+pub fn create_string(vm: &mut VM, content: &str) -> ObjectRef<String> {
+    match vm.strings.get(content) {
         Some(InternedString(obj_root)) => Rc::downgrade(obj_root),
         None => {
-            let obj_string = Obj::<String> {
-                content: s.to_owned(),
-            };
-            let obj_root = Rc::new(obj_string);
-            let obj_ref = Rc::downgrade(&obj_root);
-            let interned_string = InternedString(obj_root);
-            vm.strings.insert(interned_string);
-            obj_ref
+            let string = content.to_owned();
+            let string_root = Rc::new(string);
+            let string_ref = Rc::downgrade(&string_root);
+            let string_interned = InternedString(Rc::clone(&string_root));
+            vm.strings.insert(string_interned);
+            vm.objects.push(Box::new(string_root));
+            string_ref
         }
+    }
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum FunctionType {
+    Function,
+    Script,
+}
+
+pub struct Function {
+    pub name: Option<ObjectRef<String>>,
+    pub arity: usize,
+    pub chunk: Chunk,
+}
+
+impl Function {
+    pub fn new(vm: &mut VM, name: Option<&str>, arity: usize) -> Self {
+        let name = name.map(|s| create_string(vm, s));
+        Function {
+            name,
+            arity,
+            chunk: Chunk::default(),
+        }
+    }
+}
+
+impl Display for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", format_function_name(self))
+    }
+}
+
+pub fn format_funcion(function_ref: &ObjectRef<Function>) -> String {
+    let function = &function_ref.upgrade().unwrap();
+    format_function_name(function)
+}
+
+pub fn format_function_name(function: &Function) -> String {
+    function
+        .name
+        .as_ref()
+        .map(|s| format!("<fn {}>", s.upgrade().unwrap()))
+        .unwrap_or_else(|| "<script>".to_owned())
+}
+
+pub type NativeFn = fn(arg_count: usize, args: &[Value]) -> Value;
+
+pub struct NativeFunction {
+    pub function: NativeFn,
+}
+
+impl NativeFunction {
+    pub fn new(function: NativeFn) -> Self {
+        NativeFunction { function }
+    }
+}
+
+impl Display for NativeFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<native fn>")
     }
 }

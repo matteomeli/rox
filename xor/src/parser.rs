@@ -39,7 +39,8 @@ impl ParseRule {
         match token_type {
             TokenType::LeftParen => ParseRule {
                 prefix: Some(grouping),
-                ..ParseRule::default()
+                infix: Some(call),
+                precedence: Precedence::Call,
             },
             TokenType::RightParen => ParseRule::default(),
             TokenType::LeftBrace => ParseRule::default(),
@@ -245,7 +246,7 @@ fn string(compiler: &mut Compiler, _can_assign: bool) {
 fn variable(compiler: &mut Compiler, can_assign: bool) {
     let name_str = compiler.previous.as_ref().unwrap().lexeme.unwrap();
     let name = compiler.previous_identifier();
-    match compiler.resolve_local(name_str) {
+    match compiler.fc.resolve_local(name_str) {
         Err(e) => {
             compiler.short_error(e);
         }
@@ -271,7 +272,7 @@ fn variable(compiler: &mut Compiler, can_assign: bool) {
                 Ok(slot) => {
                     if can_assign && compiler.match_token(TokenType::Equal) {
                         // Disallow assignments to let variables after the first one
-                        let interned: InternedString = name.clone().try_into().unwrap();
+                        let interned: InternedString = name.try_into().unwrap();
                         if let Some(was_assigned) = compiler.vm.lets.get_mut(&interned) {
                             if *was_assigned {
                                 compiler.short_error(CompileError::LetReassignment);
@@ -310,4 +311,9 @@ fn or(compiler: &mut Compiler, _can_assign: bool) {
     compiler.parse_precedence(Precedence::Or);
 
     compiler.patch_jump(end_jump);
+}
+
+fn call(compiler: &mut Compiler, _can_assign: bool) {
+    let arg_count = compiler.argument_list();
+    compiler.emit_bytes(OpCode::Call.into(), arg_count as u8);
 }

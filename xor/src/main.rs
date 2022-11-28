@@ -1,10 +1,26 @@
 use std::io::{BufRead, Write};
 
-use xor::vm::{VMError, VM};
+use xor::{
+    value::Value,
+    vm::{VMError, VM},
+};
+
+fn clock() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+}
+
+fn clock_native(_arg_count: usize, _args: &[Value]) -> Value {
+    Value::Number(clock() as f64)
+}
 
 #[allow(unused_variables, unreachable_code, unused_mut)]
 fn main() {
     let mut vm = VM::default();
+
+    vm.define_native("clock", clock_native);
 
     let args: Vec<String> = std::env::args().collect();
     let argc = args.len();
