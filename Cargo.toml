@@ -1,2 +1,5 @@
 [workspace]
 members = ["cli", "core", "tester", "xor"]
+
+[profile.release]
+debug = true

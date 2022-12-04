@@ -4,63 +4,6 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-    
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in library 'rox'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--lib",
-                    "--package=rox"
-                ],
-                "filter": {
-                    "name": "rox",
-                    "kind": "lib"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug executable 'rox'",
-            "cargo": {
-                "args": [
-                    "build",
-                    "--bin=rox",
-                    "--package=rox"
-                ],
-                "filter": {
-                    "name": "rox",
-                    "kind": "bin"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in executable 'rox'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--bin=rox",
-                    "--package=rox"
-                ],
-                "filter": {
-                    "name": "rox",
-                    "kind": "bin"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
-        },
         {
             "type": "lldb",
             "request": "launch",
@@ -96,16 +39,12 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Launch with test file",
-            "program": "${workspaceRoot}/target/release/rox",
-            "args": ["${workspaceRoot}/test.rox"],
-            //"stopAtEntry": false,
+            "name": "Launch XOR with test file",
+            "program": "${workspaceRoot}/target/debug/xor",
+            "args": ["${workspaceRoot}/tests/benchmark/fib.lox"],
             "cwd": "${workspaceFolder}",
-            // "sourceFileMap": {
-            //     "/rustc/9d1b2106e23b1abd32fce1f17267604a5102f57a": "${env:USERPROFILE}/scoop/apps/rustup/current/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/src/rust"
-            // },
-            //"symbolSearchPath": "https://msdl.microsoft.com/download/symbols",
-            //"environment": [],
+            "stopOnEntry": false,
+            "sourceLanguages": ["rust"],
             "console": "integratedTerminal"
         }
     ]
