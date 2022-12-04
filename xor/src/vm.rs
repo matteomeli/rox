@@ -128,7 +128,7 @@ fn rt(re: RuntimeError) -> InterpretResult {
 }
 
 // This trait marks any object managed by the VM
-pub trait Object {}
+pub trait ManagedObject {}
 
 pub struct CallFrame {
     function: ObjectRoot<Function>,
@@ -141,7 +141,7 @@ pub struct VM {
     ip: usize,
     pub stack: Vec<Value>,
     pub strings: FnvHashSet<InternedString>,
-    pub objects: Vec<Box<dyn Object>>,
+    pub objects: Vec<Box<dyn ManagedObject>>,
     pub globals_indices: FnvHashMap<InternedString, Value>, // Associates an index in 'globals' for each global variable identifier
     pub globals: Vec<(Value, Value)>, // Packs a (name, value) pair for each global variable
     pub lets: FnvHashMap<InternedString, bool>, // Stores variables declared by let that can be assigned only once
@@ -503,7 +503,7 @@ impl VM {
 
 pub fn manage<T: 'static>(vm: &mut VM, object: T) -> ObjectRef<T>
 where
-    ObjectRoot<T>: Object,
+    ObjectRoot<T>: ManagedObject,
 {
     let object_root = Rc::new(object);
     let object_ref = Rc::downgrade(&object_root);

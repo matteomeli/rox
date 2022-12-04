@@ -7,17 +7,17 @@ use std::{
 
 use crate::{
     chunk::Chunk,
-    vm::{Object, RuntimeError, VMError, VM},
+    vm::{ManagedObject, RuntimeError, VMError, VM},
 };
 
 pub type ObjectRoot<T> = Rc<T>;
 pub type ObjectRef<T> = Weak<T>;
 
-impl Object for ObjectRoot<String> {}
+impl ManagedObject for ObjectRoot<String> {}
 
-impl Object for ObjectRoot<Function> {}
+impl ManagedObject for ObjectRoot<Function> {}
 
-impl Object for ObjectRoot<NativeFunction> {}
+impl ManagedObject for ObjectRoot<NativeFunction> {}
 
 #[derive(Clone)]
 pub enum Value {
