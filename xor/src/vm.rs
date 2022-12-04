@@ -186,9 +186,9 @@ impl VM {
 
     #[allow(clippy::single_match)]
     fn run(&mut self) -> InterpretResult {
+        #[allow(unused_macros)]
         macro_rules! binary_op {
             ($op:tt) => {{
-                // TODO: Optimise like NEGATE, removing one pop and apply the operation in place
                 let b: f64 = self.pop_stack()?.try_into()?;
                 let a: f64 = self.pop_stack()?.try_into()?;
                 self.stack.push((a $op b).into());
@@ -313,27 +313,66 @@ impl VM {
                     OpCode::True => self.stack.push(Value::Bool(true)),
                     OpCode::False => self.stack.push(Value::Bool(false)),
                     OpCode::Not => {
-                        // TODO: Optimise like NEGATE, removing one pop and apply the operation in place
-                        let b = self.pop_stack()?.is_falsey();
-                        self.stack.push(Value::Bool(b));
-                    }
-                    OpCode::Equal => {
-                        let a = self.pop_stack()?;
-                        let b = self.pop_stack()?;
-                        self.stack.push((a == b).into())
-                    }
-                    OpCode::Greater => binary_op!(>),
-                    OpCode::Less => binary_op!(<),
-                    OpCode::Negate => {
-                        // Negate the value in place without popping/pushing the values stack
                         let value = self
                             .stack
                             .last_mut()
                             .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
+                        *value = Value::Bool(value.is_falsey());
+                    }
+                    OpCode::Equal => {
+                        let b = self.pop_stack()?;
+                        let a = self
+                            .stack
+                            .last_mut()
+                            .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
+                        *a = Value::Bool(*a == b);
+                    }
+                    OpCode::Greater => {
+                        let b = self.pop_stack()?;
+                        let a = self
+                            .stack
+                            .last_mut()
+                            .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
+                        match (&a, &b) {
+                            (Value::Number(n), Value::Number(m)) => *a = Value::Bool(*n > *m),
+                            (Value::Number(_), _) => {
+                                return rt(RuntimeError::TypeError("number", b.to_string(), true))
+                            }
+                            _ => return rt(RuntimeError::TypeError("number", a.to_string(), true)),
+                        }
+                    }
+                    OpCode::Less => {
+                        let b = self.pop_stack()?;
+                        let a = self
+                            .stack
+                            .last_mut()
+                            .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
+                        match (&a, &b) {
+                            (Value::Number(n), Value::Number(m)) => *a = Value::Bool(*n < *m),
+                            (Value::Number(_), _) => {
+                                return rt(RuntimeError::TypeError("number", b.to_string(), true))
+                            }
+                            _ => return rt(RuntimeError::TypeError("number", a.to_string(), true)),
+                        }
+                    }
+                    OpCode::Negate => {
+                        // Negate the value in place without popping/pushing the values stack
                         #[cfg(not(feature = "lox_errors"))]
                         {
-                            let n: f64 = -value.clone().try_into()?;
-                            *value = Value::Number(n);
+                            let value = self
+                                .stack
+                                .last_mut()
+                                .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
+                            match value {
+                                Value::Number(n) => *n = -*n,
+                                _ => {
+                                    return rt(RuntimeError::TypeError(
+                                        "number",
+                                        value.to_string(),
+                                        true,
+                                    ))
+                                }
+                            }
                         }
 
                         #[cfg(feature = "lox_errors")]
@@ -353,26 +392,70 @@ impl VM {
                     }
                     OpCode::Add => {
                         let b = self.pop_stack()?;
-                        let a = self.pop_stack()?;
-                        match (&b, &a) {
-                            (Value::Number(b), Value::Number(a)) => self.stack.push((a + b).into()),
-                            (Value::String(b), Value::String(a)) => {
-                                let a = &a.upgrade().unwrap();
-                                let b = &b.upgrade().unwrap();
-                                let s = create_string(self, &format!("{}{}", a, b));
+                        let a = self
+                            .stack
+                            .last_mut()
+                            .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
+                        match (&a, &b) {
+                            (Value::Number(n), Value::Number(m)) => *a = Value::Number(n + m),
+                            (Value::String(s1), Value::String(s2)) => {
+                                let s1 = &s1.upgrade().unwrap();
+                                let s2 = &s2.upgrade().unwrap();
+                                let s = create_string(self, &format!("{}{}", s1, s2));
+                                //*a = Value::String(s);
+                                self.stack.pop();
                                 self.stack.push(s.into())
                             }
                             _ => {
                                 return rt(RuntimeError::InvalidAddition(
                                     a.to_string(),
                                     b.to_string(),
-                                ))
+                                ));
                             }
                         }
                     }
-                    OpCode::Subtract => binary_op!(-),
-                    OpCode::Multiply => binary_op!(*),
-                    OpCode::Divide => binary_op!(/),
+                    OpCode::Subtract => {
+                        let b = self.pop_stack()?;
+                        let a = self
+                            .stack
+                            .last_mut()
+                            .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
+                        match (&a, &b) {
+                            (Value::Number(n), Value::Number(m)) => *a = Value::Number(n - m),
+                            (Value::Number(_), _) => {
+                                return rt(RuntimeError::TypeError("number", b.to_string(), true))
+                            }
+                            _ => return rt(RuntimeError::TypeError("number", a.to_string(), true)),
+                        }
+                    }
+                    OpCode::Multiply => {
+                        let b = self.pop_stack()?;
+                        let a = self
+                            .stack
+                            .last_mut()
+                            .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
+                        match (&a, &b) {
+                            (Value::Number(n), Value::Number(m)) => *a = Value::Number(n * m),
+                            (Value::Number(_), _) => {
+                                return rt(RuntimeError::TypeError("number", b.to_string(), true))
+                            }
+                            _ => return rt(RuntimeError::TypeError("number", a.to_string(), true)),
+                        }
+                    }
+                    OpCode::Divide => {
+                        let b = self.pop_stack()?;
+                        let a = self
+                            .stack
+                            .last_mut()
+                            .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
+                        match (&a, &b) {
+                            (Value::Number(n), Value::Number(m)) => *a = Value::Number(n / m),
+                            (Value::Number(_), _) => {
+                                return rt(RuntimeError::TypeError("number", b.to_string(), true))
+                            }
+                            _ => return rt(RuntimeError::TypeError("number", a.to_string(), true)),
+                        }
+                    }
                     OpCode::JumpIfFalse => {
                         let offset = self.read_short(chunk) as usize;
                         if self.peek_stack(0).is_falsey() {
