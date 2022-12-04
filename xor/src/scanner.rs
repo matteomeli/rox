@@ -250,7 +250,6 @@ impl<'a> Scanner<'a> {
                 Some('\n') => {
                     self.line += 1;
                     self.advance();
-                    break;
                 }
                 Some('/') => {
                     if self.maybe_match_str("//") {

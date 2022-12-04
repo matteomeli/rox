@@ -748,11 +748,11 @@ impl<'src, 'vm> Compiler<'src, 'vm> {
 }
 
 fn report_error(message: &str, token: &Token) {
-    eprint!("[line {}] Error ", token.line);
+    eprint!("[line {}] Error", token.line);
     match token.token_type {
         TokenType::Eof => eprint!(" at end"),
         tt if TokenType::error_message(tt).is_some() => (),
-        _ => eprint!("at '{}'", token.lexeme.unwrap()),
+        _ => eprint!(" at '{}'", token.lexeme.unwrap()),
     }
     eprintln!(": {}", message);
 }
