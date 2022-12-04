@@ -5,15 +5,15 @@ use xor::{
     vm::{VMError, VM},
 };
 
-fn clock() -> u128 {
+fn clock() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_millis()
+        .as_secs_f64()
 }
 
 fn clock_native(_arg_count: usize, _args: &[Value]) -> Value {
-    Value::Number(clock() as f64)
+    Value::Number(clock())
 }
 
 #[allow(unused_variables, unreachable_code, unused_mut)]
