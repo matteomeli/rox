@@ -377,34 +377,36 @@ impl VM {
 
                         #[cfg(feature = "lox_errors")]
                         {
-                            let n: f64 = value.clone().try_into().map_err(|vme| match vme {
-                                VMError::RuntimeError(RuntimeError::TypeError(
-                                    expected,
-                                    actual,
-                                    true,
-                                )) => VMError::RuntimeError(RuntimeError::TypeError(
-                                    expected, actual, false,
-                                )),
-                                _ => vme,
-                            })?;
-                            *value = Value::Number(-n);
+                            let value = self
+                                .stack
+                                .last_mut()
+                                .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
+                            match value {
+                                Value::Number(n) => *n = -*n,
+                                _ => {
+                                    return rt(RuntimeError::TypeError(
+                                        "number",
+                                        value.to_string(),
+                                        false,
+                                    ))
+                                }
+                            }
                         }
                     }
                     OpCode::Add => {
                         let b = self.pop_stack()?;
                         let a = self
                             .stack
-                            .last_mut()
+                            .last()
+                            .cloned()
                             .ok_or(VMError::RuntimeError(RuntimeError::StackUnderflow))?;
-                        match (&a, &b) {
-                            (Value::Number(n), Value::Number(m)) => *a = Value::Number(n + m),
+                        let value = match (&a, &b) {
+                            (Value::Number(n), Value::Number(m)) => Value::Number(n + m),
                             (Value::String(s1), Value::String(s2)) => {
                                 let s1 = &s1.upgrade().unwrap();
                                 let s2 = &s2.upgrade().unwrap();
                                 let s = create_string(self, &format!("{}{}", s1, s2));
-                                //*a = Value::String(s);
-                                self.stack.pop();
-                                self.stack.push(s.into())
+                                Value::String(s)
                             }
                             _ => {
                                 return rt(RuntimeError::InvalidAddition(
@@ -412,7 +414,9 @@ impl VM {
                                     b.to_string(),
                                 ));
                             }
-                        }
+                        };
+                        // SAFETY: Safe as existence of last element already checked above
+                        *unsafe { self.stack.last_mut().unwrap_unchecked() } = value;
                     }
                     OpCode::Subtract => {
                         let b = self.pop_stack()?;
